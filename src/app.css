@@ -4,9 +4,62 @@ body {
 }
 
 main {
-  max-width: 40rem;
+  max-width: 64rem;
   margin: 0 auto;
   padding: 1rem;
+}
+
+.editor {
+  display: grid;
+  gap: 1.5rem;
+}
+
+@media (min-width: 48rem) {
+  .editor {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .editor-preview {
+    position: sticky;
+    top: 1rem;
+  }
+}
+
+.control {
+  display: block;
+  margin: 0 0 1rem;
+  padding: 0;
+  border: 0;
+}
+
+.control legend,
+.control > label {
+  display: block;
+  margin-bottom: 0.25rem;
+  font-weight: 600;
+}
+
+.control select,
+.control textarea,
+.control input {
+  box-sizing: border-box;
+  width: 100%;
+  font: inherit;
+}
+
+.control button {
+  margin-top: 0.5rem;
+}
+
+.hint {
+  margin: 0.25rem 0 0;
+  color: #555;
+}
+
+.custom-size label {
+  display: block;
+  margin-top: 0.5rem;
 }
 
 .preview {
@@ -22,8 +75,43 @@ main {
   margin: 0 auto;
 }
 
+.preview-stale {
+  opacity: 0.4;
+}
+
 .preview-actions {
   display: flex;
   gap: 1rem;
   margin-top: 0.5rem;
+}
+
+.background-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(5.5rem, 1fr));
+  gap: 0.5rem;
+}
+
+.background-option {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin: 0;
+  padding: 0.25rem;
+  border: 2px solid transparent;
+  border-radius: 0.25rem;
+  background: none;
+  font: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.background-option[aria-pressed="true"] {
+  border-color: #1a73e8;
+}
+
+.background-option img {
+  width: 100%;
+  aspect-ratio: 9 / 16;
+  object-fit: cover;
+  border-radius: 0.125rem;
 }

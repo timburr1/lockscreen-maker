@@ -68,6 +68,7 @@ One immutable spec describes everything needed to render. React state holds it (
 type LockscreenSpec = {
   readonly size: { readonly width: number; readonly height: number } // output pixels
   readonly deviceClass: 'phone' | 'tablet' | 'desktop'              // selects the safe area; §4.4 says how custom sizes get one
+  readonly deviceSelection: DeviceSelection                          // preset id | this device | custom: where the size came from, so the picker is derived from the spec
   readonly background: BackgroundRef
   readonly focus: { readonly x: number; readonly y: number }          // 0..1, which part of the image survives the crop
   readonly text: string                                               // one textarea; split on newlines at layout time
@@ -82,7 +83,7 @@ type LockscreenSpec = {
 
 type BackgroundRef =
   | { readonly kind: 'bundled'; readonly id: string }
-  | { readonly kind: 'upload'; readonly file: File }
+  | { readonly kind: 'upload'; readonly file: File }   // added with uploads in step 6; only 'bundled' exists until then
 ```
 
 The decoded `ImageBitmap` is not in the spec. `browser/image-decode.ts` decodes once per background change, a small cache next to the spec holds the bitmap, and it is `close()`d when replaced. Re-decoding a 12-24 MP upload per edit would be unusable.
@@ -98,12 +99,15 @@ src/
   log.ts                       thin wrapper over console.error; the project's logging facility
   app.tsx                      top-level layout and state
   state/
-    spec.ts                    LockscreenSpec, defaults, reducer
+    spec.ts                    LockscreenSpec and defaults
+    spec-reduce.ts             pure reducer over spec actions
+    spec-initial.ts            first spec from the detected screen and the first background
   data/
     device-presets.ts          DevicePreset[] (typed const, not JSON)
     backgrounds.ts             discovers images in src/assets/backgrounds/ via import.meta.glob
   logic/                       pure; no DOM access; all unit-tested
     size-validate.ts           custom size → ok | specific error
+    device-screen.ts           window.screen values, pixel ratio, touch → "this device" size and class (main.tsx does the window reads)
     image-crop.ts              cover-crop rectangle from source size, target size, focus
     text-layout.ts             wrap and shrink-to-fit given a measure function
     render-plan.ts             spec + measure + luminance reader → text overlay plan (font, lines, placement, colour, backdrop)
@@ -114,7 +118,6 @@ src/
   browser/                     effects behind small functions
     image-decode.ts            File/URL → ImageBitmap (EXIF-aware), with specific errors
     lockscreen-renderer.ts     executes a render plan on a reused canvas → Blob (the only code that touches canvas)
-    device-screen.ts           window.screen → "this device" size
   ui/
     device-picker.tsx          preset select, orientation swap, custom W×H, "this device"
     background-picker.tsx      thumbnail grid + upload button

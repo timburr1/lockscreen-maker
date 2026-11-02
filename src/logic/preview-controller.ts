@@ -2,12 +2,15 @@ import { ErrorRender } from '../errors';
 import type { Size } from './geometry';
 import { latestCreate } from './latest';
 
+/** `size` is the size the blob was rendered at, which can differ from the current spec while a newer render is pending. */
+export type PreviewReady = { readonly kind: 'ready'; readonly url: string; readonly blob: Blob; readonly size: Size };
+
+/** Every state except ready carries the last good render, so the UI can keep showing it, clearly marked out of date, but never offer it for saving. */
 export type PreviewState =
-  | { readonly kind: 'idle' }
-  /** `size` is the size the blob was rendered at, which can differ from the current spec while a newer render is pending. */
-  | { readonly kind: 'ready'; readonly url: string; readonly blob: Blob; readonly size: Size }
-  | { readonly kind: 'overflow' }
-  | { readonly kind: 'error'; readonly reason: 'render' | 'internal' };
+  | PreviewReady
+  | { readonly kind: 'pending'; readonly previous: PreviewReady | undefined }
+  | { readonly kind: 'overflow'; readonly previous: PreviewReady | undefined }
+  | { readonly kind: 'error'; readonly reason: 'render' | 'internal'; readonly previous: PreviewReady | undefined };
 
 export type PreviewDeps<TSpec extends { readonly size: Size }, TImage> = {
   render(spec: TSpec, image: TImage): Promise<{ readonly kind: 'ok'; readonly blob: Blob } | { readonly kind: 'overflow' }>;
@@ -19,8 +22,8 @@ export type PreviewDeps<TSpec extends { readonly size: Size }, TImage> = {
 };
 
 export type PreviewController<TSpec, TImage> = {
-  /** Schedules a render after the debounce, replacing any render not yet started. */
-  request(spec: TSpec, image: TImage): void;
+  /** Marks the preview pending at once; renders after the debounce, replacing any render not yet started. Without an image it only marks pending. */
+  request(spec: TSpec, image: TImage | undefined): void;
   /** Cancels pending work and revokes the current object URL; later requests are ignored. */
   dispose(): void;
 };
@@ -29,15 +32,8 @@ export type PreviewController<TSpec, TImage> = {
 export function previewControllerCreate<TSpec extends { readonly size: Size }, TImage>(deps: PreviewDeps<TSpec, TImage>): PreviewController<TSpec, TImage> {
   const latest = latestCreate();
   let timer: ReturnType<typeof setTimeout> | undefined;
-  let currentUrl: string | undefined;
+  let current: PreviewReady | undefined;
   let disposed = false;
-
-  const urlReplace = (url: string | undefined) => {
-    if (currentUrl !== undefined) {
-      deps.urlRevoke(currentUrl);
-    }
-    currentUrl = url;
-  };
 
   const run = async (spec: TSpec, image: TImage) => {
     try {
@@ -46,18 +42,22 @@ export function previewControllerCreate<TSpec extends { readonly size: Size }, T
         return;
       }
       if (result.value.kind === 'overflow') {
-        deps.onState({ kind: 'overflow' });
+        deps.onState({ kind: 'overflow', previous: current });
         return;
       }
-      const url = deps.urlCreate(result.value.blob);
-      urlReplace(url);
-      deps.onState({ kind: 'ready', url, blob: result.value.blob, size: spec.size });
+      const ready: PreviewReady = { kind: 'ready', url: deps.urlCreate(result.value.blob), blob: result.value.blob, size: spec.size };
+      const replaced = current;
+      current = ready;
+      if (replaced !== undefined) {
+        deps.urlRevoke(replaced.url);
+      }
+      deps.onState(ready);
     } catch (error) {
       if (disposed) {
         return;
       }
       deps.onError('Rendering the lockscreen failed', error);
-      deps.onState({ kind: 'error', reason: error instanceof ErrorRender ? 'render' : 'internal' });
+      deps.onState({ kind: 'error', reason: error instanceof ErrorRender ? 'render' : 'internal', previous: current });
     }
   };
 
@@ -67,14 +67,20 @@ export function previewControllerCreate<TSpec extends { readonly size: Size }, T
         return;
       }
       clearTimeout(timer);
-      timer = setTimeout(() => {
-        void run(spec, image);
-      }, deps.debounceMs);
+      deps.onState({ kind: 'pending', previous: current });
+      if (image !== undefined) {
+        timer = setTimeout(() => {
+          void run(spec, image);
+        }, deps.debounceMs);
+      }
     },
     dispose() {
       disposed = true;
       clearTimeout(timer);
-      urlReplace(undefined);
+      if (current !== undefined) {
+        deps.urlRevoke(current.url);
+        current = undefined;
+      }
     },
   };
 }

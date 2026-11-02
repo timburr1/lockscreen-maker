@@ -7,11 +7,12 @@ import type { LockscreenSpecRender } from '../state/spec';
 const RENDER_DEBOUNCE_MS = 200;
 
 /**
- * Renders the spec to an image after a short pause. The spec must be referentially stable between edits (take it straight from state):
- * each completed render re-renders the caller, and a spec rebuilt on every render would retrigger the effect forever.
+ * Renders the spec to an image after a short pause; an undefined image keeps the preview pending.
+ *
+ * The spec must be referentially stable between edits (take it straight from state), because each completed render re-renders the caller and a spec rebuilt on every render would retrigger the effect forever.
  */
 export function useLockscreenImage(renderer: LockscreenRenderer, spec: LockscreenSpecRender, image: ImageBitmap | undefined): PreviewState {
-  const [state, setState] = useState<PreviewState>({ kind: 'idle' });
+  const [state, setState] = useState<PreviewState>({ kind: 'pending', previous: undefined });
   const controllerRef = useRef<PreviewController<LockscreenSpecRender, ImageBitmap> | undefined>(undefined);
 
   useEffect(() => {
@@ -31,9 +32,7 @@ export function useLockscreenImage(renderer: LockscreenRenderer, spec: Lockscree
   }, [renderer]);
 
   useEffect(() => {
-    if (image !== undefined) {
-      controllerRef.current?.request(spec, image);
-    }
+    controllerRef.current?.request(spec, image);
   }, [spec, image]);
 
   return state;

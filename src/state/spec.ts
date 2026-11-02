@@ -1,7 +1,10 @@
 import type { Size } from '../logic/geometry';
 import type { DeviceClass } from '../logic/safe-area';
 
-export type BackgroundRef = { readonly kind: 'bundled'; readonly id: string } | { readonly kind: 'upload'; readonly file: File };
+/** Where the size came from; kept in the spec so the picker cannot drift from it. */
+export type DeviceSelection = { readonly kind: 'preset'; readonly id: string } | { readonly kind: 'this-device' } | { readonly kind: 'custom' };
+
+export type BackgroundRef = { readonly kind: 'bundled'; readonly id: string };
 
 export type LockscreenStyle = {
   readonly align: 'left' | 'center';
@@ -18,6 +21,7 @@ export type LockscreenSpec = {
   /** Output pixels. */
   readonly size: Size;
   readonly deviceClass: DeviceClass;
+  readonly deviceSelection: DeviceSelection;
   readonly background: BackgroundRef;
   /** 0..1 on each axis: which part of the image survives the crop. */
   readonly focus: { readonly x: number; readonly y: number };

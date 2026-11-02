@@ -16,3 +16,7 @@ const modules = import.meta.glob<string>('/src/assets/backgrounds/*.{jpg,jpeg,pn
 export const BACKGROUNDS_BUNDLED: readonly BackgroundBundled[] = Object.entries(modules)
   .map(([path, value]) => ({ id: path, name: backgroundName(path), url: value }))
   .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+
+export function backgroundBundledFind(id: string): BackgroundBundled | undefined {
+  return BACKGROUNDS_BUNDLED.find((background) => background.id === id);
+}

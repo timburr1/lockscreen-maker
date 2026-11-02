@@ -3,19 +3,20 @@ import { logError } from '../log';
 
 export type BackgroundBitmapState = {
   readonly image: ImageBitmap | undefined;
+  /** The key the bitmap was decoded for; callers must render only when it matches the background they want. */
+  readonly imageKey: string | undefined;
+  /** The most recent load for the requested key failed. */
   readonly failed: boolean;
 };
 
-/** Decodes the image at `url`, keeping the previous bitmap until its replacement is ready and closing it only after the new one is committed. */
-export function useBackgroundBitmap(url: string | undefined, decode: (url: string) => Promise<ImageBitmap>): BackgroundBitmapState {
-  const [state, setState] = useState<BackgroundBitmapState>({ image: undefined, failed: false });
+/** Decodes the image at `url` (identified by `key`), keeping the previous bitmap until its replacement is ready and closing it only after the new one is committed. */
+export function useBackgroundBitmap(key: string, url: string, decode: (url: string) => Promise<ImageBitmap>): BackgroundBitmapState {
+  const [state, setState] = useState<BackgroundBitmapState>({ image: undefined, imageKey: undefined, failed: false });
   const { image } = state;
 
   useEffect(() => {
-    if (url === undefined) {
-      return;
-    }
     let cancelled = false;
+    setState((previous) => ({ ...previous, failed: false }));
     const load = async () => {
       try {
         const bitmap = await decode(url);
@@ -23,11 +24,11 @@ export function useBackgroundBitmap(url: string | undefined, decode: (url: strin
           bitmap.close();
           return;
         }
-        setState({ image: bitmap, failed: false });
+        setState({ image: bitmap, imageKey: key, failed: false });
       } catch (error) {
         if (!cancelled) {
           logError('Loading the background failed', error);
-          setState((previous) => ({ image: previous.image, failed: true }));
+          setState((previous) => ({ ...previous, failed: true }));
         }
       }
     };
@@ -35,7 +36,7 @@ export function useBackgroundBitmap(url: string | undefined, decode: (url: strin
     return () => {
       cancelled = true;
     };
-  }, [url, decode]);
+  }, [key, url, decode]);
 
   // Runs after the commit that replaces the bitmap, so no render can still be holding the closed one.
   useEffect(
