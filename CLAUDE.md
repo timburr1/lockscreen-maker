@@ -10,7 +10,14 @@ Lockscreen Maker is a static web site that composites user-supplied text (name, 
 - Deployment target: static hosting on the Azure free tier (Azure Static Web Apps).
 - Design documents live in `docs/`.
 
-Build, test, and architecture sections will be added here as the project takes shape.
+## Commands
+
+- `npm run dev`: Vite dev server.
+- `npm test`: Vitest, single run (Node environment, no DOM).
+- `npm run lint`: Biome check (markdown is excluded). `npx biome check --write .` fixes formatting.
+- `npm run typecheck`: `tsc --noEmit`. `npm run build` typechecks, then builds to `dist/`.
+
+Background images go in `src/assets/backgrounds/` (any filename; jpg, jpeg, png, webp). Architecture lives in `docs/design.md`.
 
 ## Interaction Guidelines
 

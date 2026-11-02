@@ -99,7 +99,7 @@ src/
     spec.ts                    LockscreenSpec, defaults, reducer
   data/
     device-presets.ts          DevicePreset[] (typed const, not JSON)
-    backgrounds.ts             BackgroundBundled[] (id, file, thumbnail, credit, license)
+    backgrounds.ts             discovers images in src/assets/backgrounds/ via import.meta.glob
   logic/                       pure; no DOM access; all unit-tested
     size-validate.ts           custom size → ok | specific error
     image-crop.ts              cover-crop rectangle from source size, target size, focus
@@ -149,7 +149,7 @@ docs/
 `DevicePreset = { id, group, name, width, height, deviceClass }` in `device-presets.ts`, in physical pixels, portrait orientation. A swap-orientation toggle exchanges width and height, offered only for tablet and desktop presets; the phone safe area only makes sense in portrait, so phones are portrait-only. This is data, so adding a phone is a one-line change.
 
 - Safe area is per **device class**, not per device. Maintaining insets for every model is a treadmill; a class default is right for most.
-- **Keep the list short** for the prototype: current iPhone sizes, a Pixel, a Galaxy, an iPad or two, and a few desktop resolutions (1920×1080, 2560×1440, 3840×2160). A long list is a treadmill; add rows on request. **The numbers must be copied from the manufacturers' spec pages when the file is written, not typed from memory**; the file gets a comment with the source per group.
+- **Keep the list short** for the prototype. Chosen from StatCounter's mobile viewport ranking (October 2026: 414×896, 360×800, 384×832, 390×844, 393×873, 360×780), which reports CSS pixels, multiplied by each family's pixel ratio to get physical pixels: iPhone 11/XR 828×1792; iPhone 12-14 1170×2532; iPhone 15/16 1179×2556; iPhone 16 Pro/17 1206×2622; iPhone Pro Max 1320×2868; Android FHD+ (Galaxy A/S, many others) 1080×2400; Pixel 1080×2424; Galaxy Ultra 1440×3120; iPad 1640×2360; iPad Pro 11" 1668×2420; desktop 1920×1080, 2560×1440, 3840×2160. These come from web searches and derivations, so each still gets checked against the manufacturer's spec page when `device-presets.ts` is written. A long list is a treadmill; add rows on request. **The numbers must be copied from the manufacturers' spec pages when the file is written, not typed from memory**; the file gets a comment with the source per group.
 - **Custom size:** two number inputs plus a device-class select (phone/tablet/desktop), since the class can't be inferred reliably. `size-validate` rejects non-integers, anything below 200 px, anything over 8192 px per side, and anything over 16,777,216 px total (the iOS canvas area limit, which is what actually binds). The error says which limit was hit.
 - **This device:** `screen.width`/`height` are CSS pixels, so multiply by `devicePixelRatio`, round, and normalise to portrait with min/max (Android swaps `screen.width`/`height` with orientation, iOS doesn't). Expect off-by-one results from fractional ratios (411 × 2.625 = 1078.9) and wrong results under desktop browser zoom; the fields stay editable. It is the **default selection on touch devices**, since the common case is making a wallpaper for the phone in hand; the preset list serves people making one for another device. Its class is `phone` when the device is touch and the short side is under ~600 CSS px, otherwise `tablet`.
 
@@ -167,7 +167,9 @@ The OS draws a clock at the top and buttons (flashlight, camera) at the bottom, 
 
 ### 4.6 Backgrounds
 
-- **Bundled:** `backgrounds.ts` lists `{ id, file, thumb, credit, license, sourceUrl }`. Full images are JPEG, long edge ~2400 px, quality ~80 (roughly 0.4-0.8 MB each). Thumbnails are ~240 px. Both live under `src/assets/backgrounds/` and are imported in `backgrounds.ts`, so Vite hashes the URLs (safe long cache lifetimes) and a missing file is a compile error; `public/` holds only `staticwebapp.config.json` and the favicon. The picker loads only thumbnails; the full image loads when selected. Generating thumbnails is a one-off Node script using `sharp` (dev dependency), outputs committed.
+- **Bundled:** drop any image (`jpg`, `jpeg`, `png`, `webp`, any filename) into `src/assets/backgrounds/`. `backgrounds.ts` finds them with `import.meta.glob('/src/assets/backgrounds/*.{jpg,jpeg,png,webp}', { eager: true, query: '?url', import: 'default' })`, so there is no list to maintain, Vite hashes the URLs (safe long cache lifetimes), and the display name derives from the filename (`golden-hour_dunes.jpg` becomes "golden hour dunes"). It lives in `src/assets` rather than `public/` for the hashing. `public/` holds only `staticwebapp.config.json` and the favicon. Aim for long edge ~2400 px, JPEG quality ~80 (roughly 0.4-0.8 MB each).
+- **Credits:** optional sidecar `src/assets/backgrounds/credits.json` keyed by filename (`{ "file.jpg": { "credit": "...", "license": "...", "sourceUrl": "..." } }`), parsed once at the boundary and shown in About. Images without an entry still work.
+- **Thumbnails:** deferred. The picker uses the full images with `loading="lazy"` and CSS scaling at first; add a `sharp` thumbnail script only if the page weight hurts.
 - **Licensing:** the 2023 images came from BLM Nevada, two Flickr users, and a Pixabay user. Each image's license must be re-checked before it's reused (Flickr CC variants differ on attribution and non-commercial terms), and the `credit` field is rendered in the About section. **Open:** reuse those 15, or source a new set?
 - **Upload:** `<input type="file" accept="image/*">`. Decoding uses `createImageBitmap(file)`, which honours EXIF orientation by default in current browsers. Failures become typed errors (`ErrorImageDecode`, `ErrorImageTooLarge`) with a user-facing message, shown inline. Pixel count isn't knowable before decoding, so: refuse files over ~25 MB before decoding, then refuse bitmaps over ~50 MP right after (a 24 MP photo is ~96 MB decoded, which many phones tolerate and 100 MP they don't). The file never leaves the browser, and the About section says so.
 - Large uploads are drawn straight to the target-size canvas, which downsamples; no separate resize step.
@@ -252,10 +254,10 @@ Each step builds and passes the suite on its own, and maps to a commit (or two):
 
 ## 12. Open questions and risks
 
-1. **Background set (Open):** reuse the 2023 images after a licence check, or choose a new set? Either way, someone has to verify licences image by image.
+1. **Background set:** the maintainer adds Creative Commons images to `src/assets/backgrounds/` and is responsible for their licences; credits go in the optional sidecar file (§4.6).
 2. **Preset list:** which devices to include at launch, and who curates it? Resolutions come from manufacturer specs.
 3. **Safe-area values:** the fractions in §4.5 are guesses. They need checking against real lock screenshots of an iPhone and a Pixel.
 4. **Long-press and Share behaviour** on current iOS and Android versions, including Samsung Internet, Firefox Android, and in-app browsers (§3). Tested on hardware at step 4.
 5. **Maximum canvas size** on older iOS devices; the 16.7 MP cap is conservative but unverified on hardware.
-6. **Lost-phone template (Open):** the original's use case (prefilled "if found" lines) could be the default text or a one-click preset. Cheap either way; it needs your call on the wording, since you may want to write that copy yourself.
+6. **Lost-phone template:** the default text is a "lost phone" template with obvious placeholder lines; the maintainer will rewrite the copy after the app works.
 7. **Fonts:** system fonts look different per OS, so the same spec yields slightly different images on iOS and Windows. Acceptable for the prototype; a bundled font fixes it.
