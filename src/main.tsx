@@ -7,6 +7,7 @@ import { type LockscreenRenderer, lockscreenRendererCreate } from './browser/loc
 import { ErrorRender } from './errors';
 import { logError } from './log';
 import { deviceScreenSize } from './logic/device-screen';
+import { ErrorBoundary } from './ui/error-boundary';
 
 const root = document.getElementById('root');
 if (root === null) {
@@ -31,7 +32,9 @@ createRoot(root).render(
     {renderer === undefined ? (
       <p role="alert">This browser cannot create images.</p>
     ) : (
-      <App renderer={renderer} imageDecodeUrl={imageDecodeUrl} imageDecodeFile={imageDecodeFile} screen={screen} screenPreferred={touch} touch={touch} />
+      <ErrorBoundary>
+        <App renderer={renderer} imageDecodeUrl={imageDecodeUrl} imageDecodeFile={imageDecodeFile} screen={screen} screenPreferred={touch} touch={touch} />
+      </ErrorBoundary>
     )}
   </StrictMode>,
 );

@@ -71,7 +71,7 @@ export function PreviewImage({ state, touch, guideVisible }: Props) {
   };
 
   if (shown === undefined || file === undefined) {
-    return problem === undefined ? <p>Creating image…</p> : <p role="alert">{problem}</p>;
+    return problem === undefined ? <p role="status">Creating image…</p> : <p role="alert">{problem}</p>;
   }
 
   return (

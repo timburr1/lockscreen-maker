@@ -1,5 +1,6 @@
 import type { LockscreenStyle } from '../state/spec';
 import type { SpecAction } from '../state/spec-reduce';
+import { percentFormat } from './percent-format';
 import { SliderCommit } from './slider-commit';
 
 type Props = {
@@ -38,8 +39,26 @@ export function StyleControls({ style, dispatch }: Props) {
         <option value="white">White</option>
         <option value="black">Black</option>
       </select>
-      <SliderCommit id="style-size" label="Size" min={0.5} max={2} step={0.05} value={style.sizeScale} onCommit={(sizeScale) => set({ sizeScale })} />
-      <SliderCommit id="style-scrim" label="Backdrop" min={0} max={1} step={0.05} value={style.scrim} onCommit={(scrim) => set({ scrim })} />
+      <SliderCommit
+        id="style-size"
+        label="Size"
+        min={0.5}
+        max={2}
+        step={0.05}
+        value={style.sizeScale}
+        format={percentFormat}
+        onCommit={(sizeScale) => set({ sizeScale })}
+      />
+      <SliderCommit
+        id="style-scrim"
+        label="Backdrop"
+        min={0}
+        max={1}
+        step={0.05}
+        value={style.scrim}
+        format={percentFormat}
+        onCommit={(scrim) => set({ scrim })}
+      />
       <SliderCommit
         id="style-position"
         label="Vertical position"
@@ -47,6 +66,7 @@ export function StyleControls({ style, dispatch }: Props) {
         max={1}
         step={0.01}
         value={style.position}
+        format={(value) => `${percentFormat(value)} from the top`}
         onCommit={(position) => set({ position })}
       />
     </fieldset>

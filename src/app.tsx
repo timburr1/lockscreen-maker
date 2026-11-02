@@ -8,6 +8,7 @@ import { IMAGE_UPSCALE_WARN, imageCropAxis, imageCropScale } from './logic/image
 import type { BackgroundRef } from './state/spec';
 import { specInitial } from './state/spec-initial';
 import { specReduce } from './state/spec-reduce';
+import { About } from './ui/about';
 import { BackgroundPicker } from './ui/background-picker';
 import { DevicePicker } from './ui/device-picker';
 import { FocusControl } from './ui/focus-control';
@@ -52,6 +53,8 @@ function Editor({ renderer, imageDecodeUrl: decodeUrl, imageDecodeFile: decodeFi
   const [spec, dispatch] = useReducer(specReduce, { screen, screenPreferred, backgroundId }, specInitial);
   const [guideVisible, setGuideVisible] = useState(true);
   const [uploadError, setUploadError] = useState<UploadErrorKind | undefined>(undefined);
+  // The latest accepted upload stays selectable after the user tries a bundled image.
+  const [upload, setUpload] = useState<File | undefined>(undefined);
   const load = useMemo(() => backgroundLoad(spec.background, decodeUrl, decodeFile), [spec.background, decodeUrl, decodeFile]);
   const bitmap = useBackgroundBitmap(spec.background, load);
   // A bitmap decoded for a previous background must not be drawn under the new spec.
@@ -59,11 +62,12 @@ function Editor({ renderer, imageDecodeUrl: decodeUrl, imageDecodeFile: decodeFi
   const state = useLockscreenImage(renderer, spec, image);
 
   // An upload joins the spec only once it is known to decode, so a bad file never displaces the current background.
-  const upload = async (file: File) => {
+  const uploadAccept = async (file: File) => {
     setUploadError(undefined);
     try {
       const probe = await decodeFile(file);
       probe.close();
+      setUpload(file);
       dispatch({ kind: 'background-set', background: { kind: 'upload', file } });
     } catch (error) {
       logError('Reading the uploaded image failed', error);
@@ -89,10 +93,16 @@ function Editor({ renderer, imageDecodeUrl: decodeUrl, imageDecodeFile: decodeFi
           <BackgroundPicker
             backgrounds={BACKGROUNDS_BUNDLED}
             selectedId={spec.background.kind === 'bundled' ? spec.background.id : undefined}
-            uploadName={spec.background.kind === 'upload' ? spec.background.file.name : undefined}
+            uploadName={upload?.name}
+            uploadSelected={spec.background.kind === 'upload'}
             onSelect={(id) => dispatch({ kind: 'background-set', background: { kind: 'bundled', id } })}
             uploadError={uploadError}
-            onUpload={(file) => void upload(file)}
+            onSelectUpload={() => {
+              if (upload !== undefined) {
+                dispatch({ kind: 'background-set', background: { kind: 'upload', file: upload } });
+              }
+            }}
+            onUpload={(file) => void uploadAccept(file)}
           />
           {cropAxis !== undefined && <FocusControl axis={cropAxis} focus={spec.focus} dispatch={dispatch} />}
           <TextEditor text={spec.text} onChange={(text) => dispatch({ kind: 'text-set', text })} />
@@ -105,6 +115,7 @@ function Editor({ renderer, imageDecodeUrl: decodeUrl, imageDecodeFile: decodeFi
           </div>
         </div>
       </div>
+      <About />
     </main>
   );
 }

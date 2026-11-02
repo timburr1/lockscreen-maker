@@ -1,12 +1,18 @@
 body {
   margin: 0;
   font-family: system-ui, sans-serif;
+  line-height: 1.4;
 }
 
 main {
   max-width: 64rem;
   margin: 0 auto;
   padding: 1rem;
+}
+
+:focus-visible {
+  outline: 3px solid #1a73e8;
+  outline-offset: 2px;
 }
 
 .editor {
@@ -24,6 +30,10 @@ main {
     position: sticky;
     top: 1rem;
   }
+
+  .preview img {
+    max-height: 80vh;
+  }
 }
 
 .control {
@@ -31,21 +41,41 @@ main {
   margin: 0 0 1rem;
   padding: 0;
   border: 0;
+  min-width: 0;
 }
 
 .control legend,
 .control > label {
   display: block;
   margin-bottom: 0.25rem;
+  padding: 0;
   font-weight: 600;
 }
 
 .control select,
 .control textarea,
-.control input {
+.control input:not([type="checkbox"], [type="radio"]) {
   box-sizing: border-box;
   width: 100%;
+  min-height: 2.75rem;
   font: inherit;
+}
+
+.control input[type="range"] {
+  padding: 0;
+}
+
+.control button,
+.preview-actions button,
+.preview-actions a {
+  min-height: 2.75rem;
+  padding: 0 1rem;
+  font: inherit;
+}
+
+.preview-actions a {
+  display: inline-flex;
+  align-items: center;
 }
 
 .control button {
@@ -69,7 +99,7 @@ main {
 .preview img {
   display: block;
   max-width: 100%;
-  max-height: 80vh;
+  max-height: 60vh;
   width: auto;
   height: auto;
   margin: 0 auto;
@@ -81,6 +111,7 @@ main {
 
 .preview-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 1rem;
   margin-top: 0.5rem;
 }
@@ -89,31 +120,61 @@ main {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(5.5rem, 1fr));
   gap: 0.5rem;
+  margin-bottom: 1rem;
 }
 
 .background-option {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
-  margin: 0;
-  padding: 0.25rem;
-  border: 2px solid transparent;
-  border-radius: 0.25rem;
-  background: none;
-  font: inherit;
   font-size: 0.75rem;
   cursor: pointer;
 }
 
-.background-option[aria-pressed="true"] {
-  border-color: #1a73e8;
+.background-option input {
+  position: absolute;
+  opacity: 0;
+}
+
+.background-option img,
+.background-upload-tile {
+  box-sizing: border-box;
+  width: 100%;
+  aspect-ratio: 9 / 16;
+  border: 3px solid transparent;
+  border-radius: 0.25rem;
 }
 
 .background-option img {
-  width: 100%;
-  aspect-ratio: 9 / 16;
   object-fit: cover;
-  border-radius: 0.125rem;
+}
+
+.background-upload-tile {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #eee;
+  text-align: center;
+}
+
+.background-option input:checked + img,
+.background-option input:checked + .background-upload-tile {
+  border-color: #1a73e8;
+}
+
+.background-option input:checked ~ span:last-child {
+  font-weight: 700;
+}
+
+.background-option input:checked ~ span:last-child::before {
+  content: "\2713\00a0";
+}
+
+.background-option input:focus-visible + img,
+.background-option input:focus-visible + .background-upload-tile {
+  outline: 3px solid #1a73e8;
+  outline-offset: 2px;
 }
 
 .preview-frame {
@@ -140,10 +201,21 @@ main {
   outline: 1px solid #000;
 }
 
-.control input[type="range"] {
-  padding: 0;
+.control label:has(input[type="checkbox"]) {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 2.75rem;
+  font-weight: 400;
 }
 
-.control input[type="checkbox"] {
-  width: auto;
+.about {
+  margin-top: 2rem;
+  padding-top: 1rem;
+  border-top: 1px solid #ccc;
+}
+
+.about h2,
+.about h3 {
+  margin: 0 0 0.5rem;
 }

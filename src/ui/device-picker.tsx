@@ -91,6 +91,8 @@ export function DevicePicker({ size, deviceClass, selection, screen, dispatch }:
   const [customWidth, setCustomWidth] = useState(String(size.width));
   const [customHeight, setCustomHeight] = useState(String(size.height));
   const [customError, setCustomError] = useState<SizeError | undefined>(undefined);
+  // The error is announced when a field loses focus, and hidden again while the user types toward a valid number.
+  const [customTouched, setCustomTouched] = useState(false);
 
   const customApply = (width: string, height: string, nextClass: DeviceClass) => {
     const checked = sizeValidate(numberParse(width), numberParse(height));
@@ -105,6 +107,7 @@ export function DevicePicker({ size, deviceClass, selection, screen, dispatch }:
   const select = (value: string) => {
     const next = selectionParse(value);
     setCustomError(undefined);
+    setCustomTouched(false);
     switch (next.kind) {
       case 'this-device':
         if (screen === undefined) {
@@ -133,6 +136,7 @@ export function DevicePicker({ size, deviceClass, selection, screen, dispatch }:
   };
 
   const errorId = 'custom-size-error';
+  const customErrorVisible = customError !== undefined && customTouched;
 
   return (
     <fieldset className="control">
@@ -174,10 +178,12 @@ export function DevicePicker({ size, deviceClass, selection, screen, dispatch }:
             max={SIZE_MAX_SIDE}
             step={1}
             value={customWidth}
-            aria-invalid={customError !== undefined}
-            aria-describedby={customError === undefined ? undefined : errorId}
+            aria-invalid={customErrorVisible}
+            onBlur={() => setCustomTouched(true)}
+            aria-describedby={customErrorVisible ? errorId : undefined}
             onChange={(event) => {
               setCustomWidth(event.target.value);
+              setCustomTouched(false);
               customApply(event.target.value, customHeight, deviceClass);
             }}
           />
@@ -190,10 +196,12 @@ export function DevicePicker({ size, deviceClass, selection, screen, dispatch }:
             max={SIZE_MAX_SIDE}
             step={1}
             value={customHeight}
-            aria-invalid={customError !== undefined}
-            aria-describedby={customError === undefined ? undefined : errorId}
+            aria-invalid={customErrorVisible}
+            onBlur={() => setCustomTouched(true)}
+            aria-describedby={customErrorVisible ? errorId : undefined}
             onChange={(event) => {
               setCustomHeight(event.target.value);
+              setCustomTouched(false);
               customApply(customWidth, event.target.value, deviceClass);
             }}
           />
@@ -203,7 +211,7 @@ export function DevicePicker({ size, deviceClass, selection, screen, dispatch }:
             <option value="tablet">Tablet</option>
             <option value="desktop">Desktop</option>
           </select>
-          {customError !== undefined && (
+          {customError !== undefined && customErrorVisible && (
             <p id={errorId} role="alert">
               {sizeErrorMessage(customError)}
             </p>

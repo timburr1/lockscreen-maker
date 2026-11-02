@@ -1,4 +1,5 @@
 import type { SpecAction } from '../state/spec-reduce';
+import { percentFormat } from './percent-format';
 import { SliderCommit } from './slider-commit';
 
 type Props = {
@@ -17,6 +18,7 @@ export function FocusControl({ axis, focus, dispatch }: Props) {
       max={1}
       step={0.01}
       value={focus[axis]}
+      format={percentFormat}
       onCommit={(value) => dispatch({ kind: 'focus-set', axis, value })}
     />
   );
