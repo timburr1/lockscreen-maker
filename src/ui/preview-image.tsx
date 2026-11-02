@@ -1,13 +1,15 @@
 import { useMemo, useState } from 'react';
 import { OUTPUT_MIME_TYPE } from '../browser/lockscreen-renderer';
 import { logError } from '../log';
-import type { PreviewState } from '../logic/preview-controller';
+import type { PreviewReady, PreviewState } from '../logic/preview-controller';
+import { safeAreaGuide } from '../logic/safe-area';
 
 const FILE_NAME = 'lockscreen.jpg';
 
 type Props = {
   readonly state: PreviewState;
   readonly touch: boolean;
+  readonly guideVisible: boolean;
 };
 
 function canShareFile(file: File): boolean {
@@ -30,8 +32,23 @@ function problemMessage(state: PreviewState): string | undefined {
   }
 }
 
+/** Drawn over the displayed image, never into the file, and sized from what that image was rendered with. */
+function SafeAreaGuide({ size, deviceClass }: Pick<PreviewReady, 'size' | 'deviceClass'>) {
+  const guide = safeAreaGuide(size, deviceClass);
+  const percent = (fraction: number) => `${fraction * 100}%`;
+  return (
+    <div className="preview-guide" aria-hidden="true">
+      <div className="preview-guide-reserved" style={{ height: percent(guide.top) }} />
+      <div
+        className="preview-guide-area"
+        style={{ left: percent(guide.left), top: percent(guide.top), width: percent(guide.width), height: percent(guide.height) }}
+      />
+    </div>
+  );
+}
+
 /** Shows the current image with save actions; while a newer render is pending or has failed, the last good one stays visible but dimmed and cannot be saved. */
-export function PreviewImage({ state, touch }: Props) {
+export function PreviewImage({ state, touch, guideVisible }: Props) {
   const [shareError, setShareError] = useState<string | undefined>(undefined);
   const shown = state.kind === 'ready' ? state : state.previous;
   const current = state.kind === 'ready';
@@ -60,13 +77,16 @@ export function PreviewImage({ state, touch }: Props) {
   return (
     <figure className="preview">
       {problem !== undefined && <p role="alert">{problem}</p>}
-      <img
-        className={current ? undefined : 'preview-stale'}
-        src={shown.url}
-        width={shown.size.width}
-        height={shown.size.height}
-        alt={current ? 'Your generated lockscreen' : 'Out-of-date preview of your lockscreen'}
-      />
+      <div className="preview-frame">
+        <img
+          className={current ? undefined : 'preview-stale'}
+          src={shown.url}
+          width={shown.size.width}
+          height={shown.size.height}
+          alt={current ? 'Your generated lockscreen' : 'Out-of-date preview of your lockscreen'}
+        />
+        {guideVisible && <SafeAreaGuide size={shown.size} deviceClass={shown.deviceClass} />}
+      </div>
       {current && (
         <>
           <figcaption>On a phone, hold the image and choose Save Image.</figcaption>

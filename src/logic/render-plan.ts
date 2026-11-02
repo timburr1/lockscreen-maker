@@ -8,7 +8,7 @@ import { TEXT_LINE_HEIGHT, type TextMeasure, textLayout } from './text-layout';
 export const TEXT_BASE_FONT_FRACTION = 0.06;
 /** Smallest font size as a fraction of the output width; below it the text is reported as too long. */
 export const TEXT_MIN_FONT_FRACTION = 0.025;
-/** Backdrop padding around the text block, as a fraction of the font size. */
+/** Backdrop padding around the text block, as a fraction of the base font size. */
 const SCRIM_PADDING_FRACTION = 0.5;
 
 type TextColor = 'white' | 'black';
@@ -35,12 +35,16 @@ export type RenderPlanResult = { readonly kind: 'plan'; readonly plan: RenderPla
 export function renderPlan(spec: LockscreenSpecText, measure: TextMeasure, luminanceMean: (area: Rect) => number): RenderPlanResult {
   const { size, style } = spec;
   const area = safeAreaRect(size, spec.deviceClass);
+  // The text sits inside the safe area inset by the backdrop padding, so the backdrop never leaves the safe area.
+  const baseFontSize = size.width * TEXT_BASE_FONT_FRACTION * style.sizeScale;
+  const padding = baseFontSize * SCRIM_PADDING_FRACTION;
+  const textArea: Rect = { x: area.x + padding, y: area.y + padding, width: area.width - 2 * padding, height: area.height - 2 * padding };
   const layout = textLayout({
     text: spec.text,
     measure,
-    maxWidth: area.width,
-    maxHeight: area.height,
-    baseFontSize: size.width * TEXT_BASE_FONT_FRACTION * style.sizeScale,
+    maxWidth: textArea.width,
+    maxHeight: textArea.height,
+    baseFontSize,
     minFontSize: size.width * TEXT_MIN_FONT_FRACTION,
   });
   if (layout.kind === 'overflow') {
@@ -49,13 +53,12 @@ export function renderPlan(spec: LockscreenSpecText, measure: TextMeasure, lumin
 
   const hasText = layout.lines.length > 0;
   const textColor: TextColor = style.color === 'auto' ? (hasText ? colorPick(luminanceMean(area)) : 'white') : style.color;
-  const textY = safeAreaPlace(area, layout.height, style.position);
-  const padding = layout.fontSize * SCRIM_PADDING_FRACTION;
+  const textY = safeAreaPlace(textArea, layout.height, style.position);
   const scrimColor: TextColor = textColor === 'white' ? 'black' : 'white';
   const scrim =
     hasText && style.scrim > 0
       ? {
-          rect: { x: area.x - padding, y: textY - padding, width: area.width + 2 * padding, height: layout.height + 2 * padding },
+          rect: { x: area.x, y: textY - padding, width: area.width, height: layout.height + 2 * padding },
           color: scrimColor,
           opacity: style.scrim,
         }
@@ -69,7 +72,7 @@ export function renderPlan(spec: LockscreenSpecText, measure: TextMeasure, lumin
       lineHeight: layout.fontSize * TEXT_LINE_HEIGHT,
       lines: layout.lines,
       textAlign: style.align,
-      textX: style.align === 'left' ? area.x : area.x + area.width / 2,
+      textX: style.align === 'left' ? textArea.x : textArea.x + textArea.width / 2,
       textY,
       scrim,
     },

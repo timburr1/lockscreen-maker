@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import type { DeviceClass } from './safe-area';
-import { safeAreaPlace, safeAreaRect } from './safe-area';
+import { safeAreaGuide, safeAreaPlace, safeAreaRect } from './safe-area';
 
 const classes: DeviceClass[] = ['phone', 'tablet', 'desktop'];
 const sizes = [
@@ -51,5 +51,22 @@ describe('safeAreaPlace', () => {
   test('a block as tall as the area has no travel', () => {
     expect(safeAreaPlace(area, 1000, 0)).toBe(600);
     expect(safeAreaPlace(area, 1000, 1)).toBe(600);
+  });
+});
+
+describe('safeAreaGuide', () => {
+  test('is the safe rectangle as fractions of the image', () => {
+    for (const deviceClass of classes) {
+      for (const size of sizes) {
+        const rect = safeAreaRect(size, deviceClass);
+        const guide = safeAreaGuide(size, deviceClass);
+        expect(guide.left).toBeCloseTo(rect.x / size.width, 10);
+        expect(guide.top).toBeCloseTo(rect.y / size.height, 10);
+        expect(guide.width).toBeCloseTo(rect.width / size.width, 10);
+        expect(guide.height).toBeCloseTo(rect.height / size.height, 10);
+        expect(guide.left + guide.width).toBeLessThanOrEqual(1);
+        expect(guide.top + guide.height).toBeLessThanOrEqual(1);
+      }
+    }
   });
 });

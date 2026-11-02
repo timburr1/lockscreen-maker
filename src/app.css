@@ -115,3 +115,35 @@ main {
   object-fit: cover;
   border-radius: 0.125rem;
 }
+
+.preview-frame {
+  position: relative;
+  width: fit-content;
+  max-width: 100%;
+  margin: 0 auto;
+}
+
+.preview-guide {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.preview-guide-reserved {
+  background: rgba(255, 0, 0, 0.15);
+}
+
+.preview-guide-area {
+  position: absolute;
+  box-sizing: border-box;
+  border: 2px dashed #fff;
+  outline: 1px solid #000;
+}
+
+.control input[type="range"] {
+  padding: 0;
+}
+
+.control input[type="checkbox"] {
+  width: auto;
+}

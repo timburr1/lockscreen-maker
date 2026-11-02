@@ -1,9 +1,10 @@
 import { ErrorRender } from '../errors';
 import type { Size } from './geometry';
 import { latestCreate } from './latest';
+import type { DeviceClass } from './safe-area';
 
-/** `size` is the size the blob was rendered at, which can differ from the current spec while a newer render is pending. */
-export type PreviewReady = { readonly kind: 'ready'; readonly url: string; readonly blob: Blob; readonly size: Size };
+/** `size` and `deviceClass` are what the blob was rendered with, which can differ from the current spec while a newer render is pending; overlays must match them, not the spec. */
+export type PreviewReady = { readonly kind: 'ready'; readonly url: string; readonly blob: Blob; readonly size: Size; readonly deviceClass: DeviceClass };
 
 /** Every state except ready carries the last good render, so the UI can keep showing it, clearly marked out of date, but never offer it for saving. */
 export type PreviewState =
@@ -12,7 +13,7 @@ export type PreviewState =
   | { readonly kind: 'overflow'; readonly previous: PreviewReady | undefined }
   | { readonly kind: 'error'; readonly reason: 'render' | 'internal'; readonly previous: PreviewReady | undefined };
 
-export type PreviewDeps<TSpec extends { readonly size: Size }, TImage> = {
+export type PreviewDeps<TSpec extends { readonly size: Size; readonly deviceClass: DeviceClass }, TImage> = {
   render(spec: TSpec, image: TImage): Promise<{ readonly kind: 'ok'; readonly blob: Blob } | { readonly kind: 'overflow' }>;
   urlCreate(blob: Blob): string;
   urlRevoke(url: string): void;
@@ -29,7 +30,9 @@ export type PreviewController<TSpec, TImage> = {
 };
 
 /** Debounces renders, keeps only the latest result, and owns the lifetime of the object URL shown to the user. */
-export function previewControllerCreate<TSpec extends { readonly size: Size }, TImage>(deps: PreviewDeps<TSpec, TImage>): PreviewController<TSpec, TImage> {
+export function previewControllerCreate<TSpec extends { readonly size: Size; readonly deviceClass: DeviceClass }, TImage>(
+  deps: PreviewDeps<TSpec, TImage>,
+): PreviewController<TSpec, TImage> {
   const latest = latestCreate();
   let timer: ReturnType<typeof setTimeout> | undefined;
   let current: PreviewReady | undefined;
@@ -45,7 +48,13 @@ export function previewControllerCreate<TSpec extends { readonly size: Size }, T
         deps.onState({ kind: 'overflow', previous: current });
         return;
       }
-      const ready: PreviewReady = { kind: 'ready', url: deps.urlCreate(result.value.blob), blob: result.value.blob, size: spec.size };
+      const ready: PreviewReady = {
+        kind: 'ready',
+        url: deps.urlCreate(result.value.blob),
+        blob: result.value.blob,
+        size: spec.size,
+        deviceClass: spec.deviceClass,
+      };
       const replaced = current;
       current = ready;
       if (replaced !== undefined) {

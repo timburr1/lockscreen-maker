@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { ErrorRender } from '../errors';
 import { type PreviewState, previewControllerCreate } from './preview-controller';
 
-type Spec = { readonly size: { readonly width: number; readonly height: number }; readonly id: string };
+type Spec = { readonly size: { readonly width: number; readonly height: number }; readonly deviceClass: 'phone' | 'tablet' | 'desktop'; readonly id: string };
 type Outcome = { readonly kind: 'ok'; readonly blob: Blob } | { readonly kind: 'overflow' };
 
 function deferred<T>() {
@@ -37,8 +37,8 @@ function setup(render: (spec: Spec, image: string) => Promise<Outcome>) {
   return { controller, states, settled, created, revoked, errors };
 }
 
-const specA: Spec = { size: { width: 100, height: 200 }, id: 'a' };
-const specB: Spec = { size: { width: 300, height: 400 }, id: 'b' };
+const specA: Spec = { size: { width: 100, height: 200 }, deviceClass: 'phone', id: 'a' };
+const specB: Spec = { size: { width: 300, height: 400 }, deviceClass: 'tablet', id: 'b' };
 const ok = async (): Promise<Outcome> => ({ kind: 'ok', blob: new Blob(['x']) });
 
 beforeEach(() => {
@@ -56,7 +56,7 @@ describe('previewControllerCreate', () => {
     expect(states).toEqual([{ kind: 'pending', previous: undefined }]);
     await vi.advanceTimersByTimeAsync(200);
     expect(states).toHaveLength(2);
-    expect(states[1]).toMatchObject({ kind: 'ready', size: { width: 100, height: 200 } });
+    expect(states[1]).toMatchObject({ kind: 'ready', size: { width: 100, height: 200 }, deviceClass: 'phone' });
   });
 
   test('a request without an image is pending and never renders', async () => {

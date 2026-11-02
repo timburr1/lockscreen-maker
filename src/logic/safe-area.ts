@@ -27,3 +27,12 @@ export function safeAreaRect(size: Size, deviceClass: DeviceClass): Rect {
 export function safeAreaPlace(area: Rect, blockHeight: number, position: number): number {
   return area.y + Math.max(0, area.height - blockHeight) * position;
 }
+
+/** The safe rectangle as fractions of the image, for drawing a guide over a scaled copy of it. */
+export function safeAreaGuide(
+  size: Size,
+  deviceClass: DeviceClass,
+): { readonly left: number; readonly top: number; readonly width: number; readonly height: number } {
+  const rect = safeAreaRect(size, deviceClass);
+  return { left: rect.x / size.width, top: rect.y / size.height, width: rect.width / size.width, height: rect.height / size.height };
+}

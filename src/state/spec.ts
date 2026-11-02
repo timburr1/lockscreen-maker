@@ -4,7 +4,8 @@ import type { DeviceClass } from '../logic/safe-area';
 /** Where the size came from; kept in the spec so the picker cannot drift from it. */
 export type DeviceSelection = { readonly kind: 'preset'; readonly id: string } | { readonly kind: 'this-device' } | { readonly kind: 'custom' };
 
-export type BackgroundRef = { readonly kind: 'bundled'; readonly id: string };
+/** Compared by identity to tell whether a decoded bitmap belongs to the current background. */
+export type BackgroundRef = { readonly kind: 'bundled'; readonly id: string } | { readonly kind: 'upload'; readonly file: File };
 
 export type LockscreenStyle = {
   readonly align: 'left' | 'center';

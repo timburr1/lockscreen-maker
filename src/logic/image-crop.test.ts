@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { imageCropRect, imageCropScale } from './image-crop';
+import { imageCropAxis, imageCropRect, imageCropScale } from './image-crop';
 
 const target = { width: 1000, height: 2000 };
 
@@ -70,5 +70,26 @@ describe('imageCropScale', () => {
 
   test('uses the axis that needs more enlargement', () => {
     expect(imageCropScale({ width: 4000, height: 1000 }, target)).toBe(2);
+  });
+});
+
+describe('imageCropAxis', () => {
+  test('a wider source is cropped horizontally and a taller one vertically', () => {
+    expect(imageCropAxis({ width: 4000, height: 2000 }, target)).toBe('x');
+    expect(imageCropAxis({ width: 1000, height: 4000 }, target)).toBe('y');
+  });
+
+  test('matching aspect ratios crop nothing', () => {
+    expect(imageCropAxis({ width: 500, height: 1000 }, target)).toBeUndefined();
+  });
+
+  test('agrees with imageCropRect about which axis has room to move', () => {
+    const source = { width: 3000, height: 3000 };
+    const axis = imageCropAxis(source, target);
+    const low = imageCropRect(source, target, { x: 0, y: 0 });
+    const high = imageCropRect(source, target, { x: 1, y: 1 });
+    expect(axis).toBe('x');
+    expect(high.x).toBeGreaterThan(low.x);
+    expect(high.y).toBe(low.y);
   });
 });

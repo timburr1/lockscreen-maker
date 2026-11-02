@@ -64,27 +64,41 @@ describe('renderPlan', () => {
     const top = planOf({ ...baseSpec, style: { ...baseSpec.style, position: 0 } });
     const bottom = planOf({ ...baseSpec, style: { ...baseSpec.style, position: 1 } });
     const height = top.lines.length * top.lineHeight;
-    expect(top.textY).toBe(area.y);
-    expect(bottom.textY).toBeCloseTo(area.y + area.height - height, 6);
+    expect(top.textY).toBeGreaterThanOrEqual(area.y);
+    expect(bottom.textY + height).toBeLessThanOrEqual(area.y + area.height);
     expect(bottom.textY).toBeGreaterThan(top.textY);
   });
 
-  test('alignment anchors the text at the left edge or the centre of the safe area', () => {
+  test('alignment anchors the text at the left or the centre of the safe area, inset from its edge', () => {
     const area = safeAreaRect(baseSpec.size, 'phone');
-    expect(planOf({ ...baseSpec, style: { ...baseSpec.style, align: 'left' } }).textX).toBe(area.x);
-    expect(planOf({ ...baseSpec, style: { ...baseSpec.style, align: 'center' } }).textX).toBe(area.x + area.width / 2);
+    const left = planOf({ ...baseSpec, style: { ...baseSpec.style, align: 'left' } });
+    const centre = planOf({ ...baseSpec, style: { ...baseSpec.style, align: 'center' } });
+    expect(left.textX).toBeGreaterThanOrEqual(area.x);
+    expect(left.textX).toBeLessThan(area.x + area.width / 2);
+    expect(centre.textX).toBeCloseTo(area.x + area.width / 2, 6);
   });
 
-  test('backdrop appears only when scrim is above zero, in the colour opposite the text, around the text block', () => {
+  test('backdrop appears only when scrim is above zero, in the colour opposite the text', () => {
     expect(planOf({ ...baseSpec, style: { ...baseSpec.style, scrim: 0 } }).scrim).toBeUndefined();
     const plan = planOf({ ...baseSpec, style: { ...baseSpec.style, scrim: 0.4, color: 'white' } });
     expect(plan.scrim?.color).toBe('black');
     expect(plan.scrim?.opacity).toBe(0.4);
-    const rect = plan.scrim?.rect;
-    expect(rect).toBeDefined();
-    if (rect !== undefined) {
-      expect(rect.y).toBeLessThan(plan.textY);
-      expect(rect.y + rect.height).toBeGreaterThan(plan.textY + plan.lines.length * plan.lineHeight);
+  });
+
+  test('the backdrop surrounds the text block and stays inside the safe area at every position', () => {
+    const area = safeAreaRect(baseSpec.size, 'phone');
+    for (const position of [0, 0.5, 1]) {
+      const plan = planOf({ ...baseSpec, style: { ...baseSpec.style, scrim: 0.4, position } });
+      const rect = plan.scrim?.rect;
+      expect(rect).toBeDefined();
+      if (rect !== undefined) {
+        expect(rect.y).toBeLessThan(plan.textY);
+        expect(rect.y + rect.height).toBeGreaterThan(plan.textY + plan.lines.length * plan.lineHeight);
+        expect(rect.x).toBeGreaterThanOrEqual(area.x);
+        expect(rect.y).toBeGreaterThanOrEqual(area.y);
+        expect(rect.x + rect.width).toBeLessThanOrEqual(area.x + area.width);
+        expect(rect.y + rect.height).toBeLessThanOrEqual(area.y + area.height);
+      }
     }
   });
 

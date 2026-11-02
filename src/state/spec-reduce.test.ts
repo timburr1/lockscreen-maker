@@ -38,6 +38,27 @@ describe('specReduce', () => {
     expect(next.focus).toEqual({ x: 0.5, y: 0.5 });
   });
 
+  test('focus-set moves one axis and leaves the other', () => {
+    expect(specReduce(spec, { kind: 'focus-set', axis: 'x', value: 0.2 }).focus).toEqual({ x: 0.2, y: 0.5 });
+    expect(specReduce(spec, { kind: 'focus-set', axis: 'y', value: 0.8 }).focus).toEqual({ x: 0.5, y: 0.8 });
+  });
+
+  test('style-set merges the given fields and keeps everything else', () => {
+    const next = specReduce(spec, { kind: 'style-set', style: { align: 'left', scrim: 0 } });
+    expect(next.style).toEqual({ ...SPEC_DEFAULT_STYLE, align: 'left', scrim: 0 });
+    expect({ ...next, style: spec.style }).toEqual(spec);
+  });
+
+  test('background-set accepts an upload', () => {
+    const background = { kind: 'upload', file: new File(['x'], 'a.png') } as const;
+    expect(specReduce(spec, { kind: 'background-set', background }).background).toBe(background);
+  });
+
+  test('selecting the already-selected bundled background changes nothing, including the focus', () => {
+    const moved = { ...spec, focus: { x: 0.1, y: 0.9 } };
+    expect(specReduce(moved, { kind: 'background-set', background: { kind: 'bundled', id: 'a' } })).toBe(moved);
+  });
+
   test('does not mutate the previous spec', () => {
     const before = structuredClone(spec);
     specReduce(spec, { kind: 'text-set', text: 'x' });

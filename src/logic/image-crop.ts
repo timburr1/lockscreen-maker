@@ -5,6 +5,18 @@ export function imageCropScale(source: Size, target: Size): number {
   return Math.max(target.width / source.width, target.height / source.height);
 }
 
+/** Upscale factor above which the result starts to look soft and the user is told. */
+export const IMAGE_UPSCALE_WARN = 1.5;
+
+/** The axis along which the cover-crop discards image, and so the only one a focus control can move; undefined when the aspect ratios match. */
+export function imageCropAxis(source: Size, target: Size): 'x' | 'y' | undefined {
+  const excess = source.width * target.height - target.width * source.height;
+  if (excess > 0) {
+    return 'x';
+  }
+  return excess < 0 ? 'y' : undefined;
+}
+
 /** The part of the source that covers the target aspect ratio; focus 0..1 picks where along the cropped axis it sits. */
 export function imageCropRect(source: Size, target: Size, focus: { readonly x: number; readonly y: number }): Rect {
   // The binding axis is taken from the source verbatim and the other derived from it, so the rectangle never leaves the source through rounding.

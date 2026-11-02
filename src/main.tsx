@@ -2,7 +2,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './app';
 import './app.css';
-import { imageDecodeUrl } from './browser/image-decode';
+import { imageDecodeFile, imageDecodeUrl } from './browser/image-decode';
 import { type LockscreenRenderer, lockscreenRendererCreate } from './browser/lockscreen-renderer';
 import { ErrorRender } from './errors';
 import { logError } from './log';
@@ -31,7 +31,7 @@ createRoot(root).render(
     {renderer === undefined ? (
       <p role="alert">This browser cannot create images.</p>
     ) : (
-      <App renderer={renderer} imageDecode={imageDecodeUrl} screen={screen} screenPreferred={touch} touch={touch} />
+      <App renderer={renderer} imageDecodeUrl={imageDecodeUrl} imageDecodeFile={imageDecodeFile} screen={screen} screenPreferred={touch} touch={touch} />
     )}
   </StrictMode>,
 );
