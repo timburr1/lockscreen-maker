@@ -14,5 +14,5 @@
       "nursery": { "noFloatingPromises": "error" }
     }
   },
-  "files": { "includes": ["**", "!dist", "!node_modules", "!**/*.md"] }
+  "files": { "includes": ["**", "!dist", "!node_modules", "!**/*.md", "!.github"] }
 }
