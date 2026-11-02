@@ -93,7 +93,9 @@ Category-first naming per CLAUDE.md. Directory layout:
 
 ```
 src/
-  main.tsx                     entry; wires real browser effects into the app
+  main.tsx                     entry; creates the one app-lifetime renderer and passes real browser effects into App
+  errors.ts                    ErrorRender, ErrorImageDecode
+  log.ts                       thin wrapper over console.error; the project's logging facility
   app.tsx                      top-level layout and state
   state/
     spec.ts                    LockscreenSpec, defaults, reducer
@@ -104,14 +106,14 @@ src/
     size-validate.ts           custom size → ok | specific error
     image-crop.ts              cover-crop rectangle from source size, target size, focus
     text-layout.ts             wrap and shrink-to-fit given a measure function
-    render-plan.ts             spec + image size + measure + luminance → list of draw operations
-    render-latest.ts           "latest render wins": stale-result dropping and URL revocation
+    render-plan.ts             spec + measure + luminance reader → text overlay plan (font, lines, placement, colour, backdrop)
+    latest.ts                  "latest wins": drops superseded async results, including failures
+    preview-controller.ts      debounce, latest-wins, and object-URL lifetime; adapter hooks stay thin
     color-pick.ts              average luminance of a pixel buffer → white | black
     safe-area.ts               device class + position → text block rectangle
   browser/                     effects behind small functions
     image-decode.ts            File/URL → ImageBitmap (EXIF-aware), with specific errors
-    render-lockscreen.ts       executes a render plan on a reused canvas → Blob (the only code that touches canvas)
-    log.ts                     thin wrapper over console.error; the project's logging facility
+    lockscreen-renderer.ts     executes a render plan on a reused canvas → Blob (the only code that touches canvas)
     device-screen.ts           window.screen → "this device" size
   ui/
     device-picker.tsx          preset select, orientation swap, custom W×H, "this device"
@@ -127,22 +129,22 @@ docs/
   design.md
 ```
 
-`render-lockscreen.ts` is deliberately the only canvas user and contains no decisions: it executes the draw operations that the pure `render-plan.ts` returns. Crop, text block, layout, colour, and scrim decisions (where the bugs will be) are therefore unit-testable with a fake monospace `measure` and a fake luminance reader.
+`lockscreen-renderer.ts` is deliberately the only canvas user and contains no decisions: it draws the cropped background, then executes the overlay plan that the pure `render-plan.ts` returns. Text block, layout, colour, and scrim decisions (where the bugs will be) are therefore unit-testable with a fake monospace `measure` and a fake luminance reader.
 
 ### 4.3 Render pipeline
 
-`renderPlan(spec, imageSize, measure, luminanceAt)` (pure) returns draw operations; `renderLockscreen(plan, image, canvas) → Promise<Blob>` executes them.
+The renderer draws the cropped background first, because the colour pick reads it back. `renderPlan(spec, measure, luminanceMean)` (pure) then returns the text overlay plan, and the renderer draws it and encodes the blob.
 
 1. **Crop:** `image-crop` computes the source rectangle that covers the target aspect ratio, shifted toward `spec.focus`. If the source is smaller than the target it upscales; the UI warns when the factor exceeds ~1.5×.
 2. **Font size:** base size = `output width × 0.06` (tunable constant) × `style.sizeScale`. Text wraps to the safe-area width at that size. If the wrapped height exceeds the safe-area height, shrink until it fits, down to a floor (~`output width × 0.025`). Below the floor the plan is a typed `TextOverflow` result and the UI says the text is too long; nothing is drawn at an unreadable size. Short text stays at the base size and does not grow to fill the area.
-3. **Placement:** the block height is the *laid-out* text height. Desktop has no inset: lock-screen layouts differ too much between OSes to model, and the core use case is phones. `style.position` slides that block between the top and bottom of the safe area, so the slider has travel whenever the text is shorter than the area.
-4. **Colour:** for `color: 'auto'`, the mean relative luminance of the safe area (via `luminanceAt`, backed by `getImageData` on a context created with `willReadFrequently`) picks white or black through `color-pick`. Sampling the whole safe area rather than the moving block keeps the colour from flipping as the position slider moves. This generalises the 2023 tool's per-image override. `getImageData` is safe because bundled images are same-origin and uploads are blob-backed, so the canvas is never tainted.
+3. **Placement:** the block height is the *laid-out* text height. Desktop gets only a small margin: lock-screen layouts differ too much between OSes to model, and the core use case is phones. `style.position` slides that block between the top and bottom of the safe area, so the slider has travel whenever the text is shorter than the area.
+4. **Colour:** for `color: 'auto'`, the mean relative luminance of the safe area (via the `luminanceMean` reader, backed by `getImageData` on a 32×32 downsample on a context created with `willReadFrequently`) picks white or black through `color-pick`. Sampling the whole safe area rather than the moving block keeps the colour from flipping as the position slider moves. This generalises the 2023 tool's per-image override. `getImageData` is safe because bundled images are same-origin and uploads are blob-backed, so the canvas is never tainted.
 5. **Scrim (optional):** a translucent rectangle in the opposite colour at `style.scrim` opacity behind the block, for busy backgrounds.
 6. **Text:** weight 600 on the system font stack (`-apple-system`/`system-ui` first; confirm Safari canvas resolves `system-ui`).
 
 **Canvas lifecycle.** iOS Safari frees canvas memory late; creating a new full-size canvas per render eventually hits "Total canvas memory use exceeds the maximum limit" and yields blank output or a `null` blob with no exception. So one canvas is created and reused, and resized to 0×0 on teardown. `toBlob` returning `null` rejects with `ErrorRender`; it is never swallowed.
 
-**When to render.** Encoding is not free on mid-range phones. Text input renders debounced (~200 ms); slider controls render on release (`onChange`) rather than every `input` event. `render-latest.ts` gives each request a token, drops results that are no longer the latest, and revokes the replaced object URL; it is tested with fake timers.
+**When to render.** Encoding is not free on mid-range phones. Text input renders debounced (~200 ms); slider controls render on release (`onChange`) rather than every `input` event. `preview-controller.ts` owns the debounce, drops results that are no longer the latest (a superseded failure included, via `latest.ts`), and revokes replaced object URLs; it is tested with fake timers and injected render and URL functions. The ready state carries the size the blob was rendered at.
 
 ### 4.4 Device presets
 
@@ -161,7 +163,7 @@ The OS draws a clock at the top and buttons (flashlight, camera) at the bottom, 
 | --- | --- | --- | --- |
 | phone | ~0.30 | ~0.14 | ~0.08 |
 | tablet | ~0.25 | ~0.10 | ~0.10 |
-| desktop | 0 | 0 | 0 |
+| desktop | 0.05 | 0.05 | 0.05 |
 
 `style.position` slides the text block between the top and bottom of what remains. The guide overlay (a dashed box over the preview) shows the safe rectangle and a shaded clock zone, and a checkbox hides it. It is purely visual, in the DOM, and never in the file.
 
@@ -218,7 +220,7 @@ Unit tests (Vitest, Node environment, no DOM):
 - `size-validate`: boundaries (199/200, 8192/8193, the total-pixel cap via e.g. 8192×2049), non-integers, NaN. Assert on error *kind*, not message text.
 - `image-crop`: wider-than-target, taller-than-target, exact aspect match, focus at 0, 0.5, 1; rectangle always inside the source.
 - `text-layout` and `render-plan` with a fake monospace measure (in the shared test-support directory): wrapping at word boundaries, a single word wider than the block (breaks by character), short text stays at the base size, shrinks until it fits, overflow below the floor yields `TextOverflow`, `sizeScale` above 1 really enlarges (until overflow), the position slider has travel for short text, blank-line gaps, colour pick uses a fake luminance reader.
-- `render-latest`: stale results dropped, replaced URLs revoked, with fake timers.
+- `latest` and `preview-controller`: stale results and stale failures dropped, replaced URLs revoked, dispose, with fake timers.
 - `color-pick`: all-black, all-white, mid-grey threshold, a half-and-half buffer.
 - `safe-area`: rectangle stays inside the image for every class and for `position` 0, 0.5, 1; a portrait and a landscape size.
 - `device-presets`: ids unique, dimensions within the validator's limits, every device class has a safe area.
@@ -237,7 +239,7 @@ Each step builds and passes the suite on its own, and maps to a commit (or two):
 1. Scaffold: Vite, React, strict TS, Biome, Vitest, a passing placeholder test, `.nvmrc`.
 2. Pure logic with tests: `size-validate`, `image-crop`, `color-pick`, `safe-area`, `text-layout`.
 3. Data: device presets and bundled backgrounds (with the images, as its own commit).
-4. `render-plan`, `render-lockscreen`, and `image-decode`: one fixed spec rendered into the preview `<img>`, with Share/Download. **Test long-press and Share on a real iPhone and Android phone now**, and measure JPEG vs PNG.
+4. `render-plan`, `lockscreen-renderer`, and `image-decode`: one fixed spec rendered into the preview `<img>`, with Share/Download. **Test long-press and Share on a real iPhone and Android phone now**, and measure JPEG vs PNG.
 5. State and UI controls wired to the spec: device picker, text editor, background picker (bundled).
 6. Upload, focus control, style controls, guide overlay.
 7. About/credits, responsive polish, accessibility pass.
