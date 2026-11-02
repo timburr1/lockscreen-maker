@@ -1,0 +1,261 @@
+# Lockscreen Maker: Prototype Design
+
+Status: draft for the initial functional prototype. Decisions marked **Open** need confirmation; everything else is a working decision.
+
+## 1. Goal
+
+A static web page where a user picks a screen size and a background image, types a few lines of text (name, phone, "if found, call…"), and gets back one finished image with the text baked in. On a phone they long-press the image and choose "Save Image" (or "Add to Photos"), then set it as the wallpaper. No screenshot, no cropping.
+
+This replaces the 2023 version (https://github.com/timburr1/timburr1.github.io/blob/master/_posts/2023-08-05-lockscreen.md), which had fixed Burning Man fields, a random pick from 15 backgrounds, text in HTML over an image, and a screenshot step. Differences:
+
+| 2023 tool | This tool |
+| --- | --- |
+| Fixed fields (name, playa address, camp, email, emergency contact) | Free-form lines |
+| Random background | Pick from a bundled set, or upload your own |
+| One layout, screenshot and trim | Output sized exactly to the chosen screen |
+| Text colour hardcoded per image | Auto-chosen from the image, user can override |
+
+### Non-goals for the prototype
+
+- Accounts, a backend, analytics, or any network call after the page loads.
+- Persisting anything (see §9).
+- Drag-and-drop text positioning, per-line styling, custom fonts, filters, stickers, or any general image editing.
+- Native lockscreen widget fidelity. We approximate the area the OS clock covers; we don't mimic iOS or Android.
+
+## 2. Decisions
+
+| Question | Decision |
+| --- | --- |
+| Backgrounds | Bundled CC set plus user upload (upload stays in the browser) |
+| Text | Free-form lines, one shared style |
+| Sizes | Preset list plus custom width×height, plus "this device" |
+| Overlap with OS clock/widgets | Per-device-class safe area, vertical position control, non-exported guide overlay |
+| Hosting | Azure Static Web Apps, Free plan, deployed from GitHub Actions |
+| Stack | TypeScript (strict), React, Vite, Vitest, Biome, npm |
+
+## 3. The core constraint: long-press to save
+
+This drives the architecture, so it comes first.
+
+- iOS Safari offers "Save to Photos" on long-press for `<img>`, not reliably for `<canvas>`. Android Chrome behaves best with `<img>` too.
+- So the canvas is never shown to the user. The pipeline is: **canvas (off-screen, at target pixel size) → `toBlob` → object URL → `<img src>`**. The `<img>` is the preview *and* the export.
+- The `<img>` has the full target resolution as its intrinsic size and is scaled down by CSS to fit the viewport. A long-press saves the full-resolution file, not the shrunken rendering.
+- A **Share/Save** button calls `navigator.share({ files: [file] })` when `navigator.canShare({ files })` is true. The iOS share sheet includes "Save Image" (to Photos) and works in in-app browsers (Instagram, Facebook, Gmail) where long-press often offers no image menu. This is in the prototype, not deferred.
+- A "Download" button (`<a download>` on the same blob URL) is shown on non-touch devices only. On iOS `download` saves to the Files app, not Photos, so on a phone it would look right and be wrong.
+- Anything that must not be in the saved file (the safe-area guide) is a DOM overlay positioned in percentages on top of the `<img>` with `pointer-events: none`, so long-press still reaches the image.
+- Output format: JPEG at quality ~0.92 by default. A photographic PNG at 1290×2796 is roughly 5-10 MB, slow to encode and to save, and JPEG at 0.92 shows little ringing around text at this size. **Measure both on a device in step 4**; switch to PNG only if text edges visibly suffer. `toBlob('image/jpeg')` needs an opaque canvas, which a full-bleed background already gives.
+
+**Risk:** iOS long-press and Photos behaviour changes between releases. If long-press on a `blob:` `<img>` fails on hardware, the fallback is a `data:` URL, and if that fails the preview architecture changes. So the real-device check happens right after the first render works (§10 step 4), not at the end.
+
+The OS may still crop or scale an exactly-sized wallpaper (iOS perspective zoom, Android home-screen scrolling). The UI copy must not promise an exact fit.
+
+## 4. Architecture
+
+Everything runs in the browser. Pure logic is separated from browser effects so the logic can be tested in Node.
+
+```
+ UI (React) ──state──▶ LockscreenSpec ──▶ render pipeline ──▶ Blob ──▶ <img> + Download
+                              │                 │
+                              │        pure: layout, crop, colour
+                              └──────── effects: canvas, image decode
+```
+
+### 4.1 Data model
+
+One immutable spec describes everything needed to render. React state holds it (a `useReducer`); the renderer is a function of it.
+
+```ts
+type LockscreenSpec = {
+  readonly size: { readonly width: number; readonly height: number } // output pixels
+  readonly deviceClass: 'phone' | 'tablet' | 'desktop'              // selects the safe area; §4.4 says how custom sizes get one
+  readonly background: BackgroundRef
+  readonly focus: { readonly x: number; readonly y: number }          // 0..1, which part of the image survives the crop
+  readonly text: string                                               // one textarea; split on newlines at layout time
+  readonly style: {
+    readonly align: 'left' | 'center'
+    readonly sizeScale: number                                        // multiplier on the base font size
+    readonly color: 'auto' | 'white' | 'black'
+    readonly scrim: number                                            // 0..1 darkening/lightening behind the text
+    readonly position: number                                         // 0..1 vertical placement inside the safe area
+  }
+}
+
+type BackgroundRef =
+  | { readonly kind: 'bundled'; readonly id: string }
+  | { readonly kind: 'upload'; readonly file: File }
+```
+
+The decoded `ImageBitmap` is not in the spec. `browser/image-decode.ts` decodes once per background change, a small cache next to the spec holds the bitmap, and it is `close()`d when replaced. Re-decoding a 12-24 MP upload per edit would be unusable.
+
+### 4.2 Modules
+
+Category-first naming per CLAUDE.md. Directory layout:
+
+```
+src/
+  main.tsx                     entry; wires real browser effects into the app
+  app.tsx                      top-level layout and state
+  state/
+    spec.ts                    LockscreenSpec, defaults, reducer
+  data/
+    device-presets.ts          DevicePreset[] (typed const, not JSON)
+    backgrounds.ts             BackgroundBundled[] (id, file, thumbnail, credit, license)
+  logic/                       pure; no DOM access; all unit-tested
+    size-validate.ts           custom size → ok | specific error
+    image-crop.ts              cover-crop rectangle from source size, target size, focus
+    text-layout.ts             wrap and shrink-to-fit given a measure function
+    render-plan.ts             spec + image size + measure + luminance → list of draw operations
+    render-latest.ts           "latest render wins": stale-result dropping and URL revocation
+    color-pick.ts              average luminance of a pixel buffer → white | black
+    safe-area.ts               device class + position → text block rectangle
+  browser/                     effects behind small functions
+    image-decode.ts            File/URL → ImageBitmap (EXIF-aware), with specific errors
+    render-lockscreen.ts       executes a render plan on a reused canvas → Blob (the only code that touches canvas)
+    log.ts                     thin wrapper over console.error; the project's logging facility
+    device-screen.ts           window.screen → "this device" size
+  ui/
+    device-picker.tsx          preset select, orientation swap, custom W×H, "this device"
+    background-picker.tsx      thumbnail grid + upload button
+    text-editor.tsx            one textarea (newlines are lines, blank lines are gaps)
+    error-boundary.tsx         generic "internal error" for bugs; typed user errors are shown inline instead
+    style-controls.tsx         align, size, colour, scrim, position, focus
+    preview-image.tsx          <img> + guide overlay + Download
+    about.tsx                  credits and the privacy statement
+public/
+  backgrounds/                 full-size and thumbnail JPEGs
+docs/
+  design.md
+```
+
+`render-lockscreen.ts` is deliberately the only canvas user and contains no decisions: it executes the draw operations that the pure `render-plan.ts` returns. Crop, text block, layout, colour, and scrim decisions (where the bugs will be) are therefore unit-testable with a fake monospace `measure` and a fake luminance reader.
+
+### 4.3 Render pipeline
+
+`renderPlan(spec, imageSize, measure, luminanceAt)` (pure) returns draw operations; `renderLockscreen(plan, image, canvas) → Promise<Blob>` executes them.
+
+1. **Crop:** `image-crop` computes the source rectangle that covers the target aspect ratio, shifted toward `spec.focus`. If the source is smaller than the target it upscales; the UI warns when the factor exceeds ~1.5×.
+2. **Font size:** base size = `output width × 0.06` (tunable constant) × `style.sizeScale`. Text wraps to the safe-area width at that size. If the wrapped height exceeds the safe-area height, shrink until it fits, down to a floor (~`output width × 0.025`). Below the floor the plan is a typed `TextOverflow` result and the UI says the text is too long; nothing is drawn at an unreadable size. Short text stays at the base size and does not grow to fill the area.
+3. **Placement:** the block height is the *laid-out* text height. Desktop has no inset: lock-screen layouts differ too much between OSes to model, and the core use case is phones. `style.position` slides that block between the top and bottom of the safe area, so the slider has travel whenever the text is shorter than the area.
+4. **Colour:** for `color: 'auto'`, the mean relative luminance of the safe area (via `luminanceAt`, backed by `getImageData` on a context created with `willReadFrequently`) picks white or black through `color-pick`. Sampling the whole safe area rather than the moving block keeps the colour from flipping as the position slider moves. This generalises the 2023 tool's per-image override. `getImageData` is safe because bundled images are same-origin and uploads are blob-backed, so the canvas is never tainted.
+5. **Scrim (optional):** a translucent rectangle in the opposite colour at `style.scrim` opacity behind the block, for busy backgrounds.
+6. **Text:** weight 600 on the system font stack (`-apple-system`/`system-ui` first; confirm Safari canvas resolves `system-ui`).
+
+**Canvas lifecycle.** iOS Safari frees canvas memory late; creating a new full-size canvas per render eventually hits "Total canvas memory use exceeds the maximum limit" and yields blank output or a `null` blob with no exception. So one canvas is created and reused, and resized to 0×0 on teardown. `toBlob` returning `null` rejects with `ErrorRender`; it is never swallowed.
+
+**When to render.** Encoding is not free on mid-range phones. Text input renders debounced (~200 ms); slider controls render on release (`onChange`) rather than every `input` event. `render-latest.ts` gives each request a token, drops results that are no longer the latest, and revokes the replaced object URL; it is tested with fake timers.
+
+### 4.4 Device presets
+
+`DevicePreset = { id, group, name, width, height, deviceClass }` in `device-presets.ts`, in physical pixels, portrait orientation. A swap-orientation toggle exchanges width and height, offered only for tablet and desktop presets; the phone safe area only makes sense in portrait, so phones are portrait-only. This is data, so adding a phone is a one-line change.
+
+- Safe area is per **device class**, not per device. Maintaining insets for every model is a treadmill; a class default is right for most.
+- **Keep the list short** for the prototype: current iPhone sizes, a Pixel, a Galaxy, an iPad or two, and a few desktop resolutions (1920×1080, 2560×1440, 3840×2160). A long list is a treadmill; add rows on request. **The numbers must be copied from the manufacturers' spec pages when the file is written, not typed from memory**; the file gets a comment with the source per group.
+- **Custom size:** two number inputs plus a device-class select (phone/tablet/desktop), since the class can't be inferred reliably. `size-validate` rejects non-integers, anything below 200 px, anything over 8192 px per side, and anything over 16,777,216 px total (the iOS canvas area limit, which is what actually binds). The error says which limit was hit.
+- **This device:** `screen.width`/`height` are CSS pixels, so multiply by `devicePixelRatio`, round, and normalise to portrait with min/max (Android swaps `screen.width`/`height` with orientation, iOS doesn't). Expect off-by-one results from fractional ratios (411 × 2.625 = 1078.9) and wrong results under desktop browser zoom; the fields stay editable. It is the **default selection on touch devices**, since the common case is making a wallpaper for the phone in hand; the preset list serves people making one for another device. Its class is `phone` when the device is touch and the short side is under ~600 CSS px, otherwise `tablet`.
+
+### 4.5 Safe area
+
+The OS draws a clock at the top and buttons (flashlight, camera) at the bottom, so text there is hidden or illegible. Defaults, as fractions of height, to tune against real screenshots:
+
+| Class | Top inset | Bottom inset | Side inset (of width) |
+| --- | --- | --- | --- |
+| phone | ~0.30 | ~0.14 | ~0.08 |
+| tablet | ~0.25 | ~0.10 | ~0.10 |
+| desktop | 0 | 0 | 0 |
+
+`style.position` slides the text block between the top and bottom of what remains. The guide overlay (a dashed box over the preview) shows the safe rectangle and a shaded clock zone, and a checkbox hides it. It is purely visual, in the DOM, and never in the file.
+
+### 4.6 Backgrounds
+
+- **Bundled:** `backgrounds.ts` lists `{ id, file, thumb, credit, license, sourceUrl }`. Full images are JPEG, long edge ~2400 px, quality ~80 (roughly 0.4-0.8 MB each). Thumbnails are ~240 px. Both live under `src/assets/backgrounds/` and are imported in `backgrounds.ts`, so Vite hashes the URLs (safe long cache lifetimes) and a missing file is a compile error; `public/` holds only `staticwebapp.config.json` and the favicon. The picker loads only thumbnails; the full image loads when selected. Generating thumbnails is a one-off Node script using `sharp` (dev dependency), outputs committed.
+- **Licensing:** the 2023 images came from BLM Nevada, two Flickr users, and a Pixabay user. Each image's license must be re-checked before it's reused (Flickr CC variants differ on attribution and non-commercial terms), and the `credit` field is rendered in the About section. **Open:** reuse those 15, or source a new set?
+- **Upload:** `<input type="file" accept="image/*">`. Decoding uses `createImageBitmap(file)`, which honours EXIF orientation by default in current browsers. Failures become typed errors (`ErrorImageDecode`, `ErrorImageTooLarge`) with a user-facing message, shown inline. Pixel count isn't knowable before decoding, so: refuse files over ~25 MB before decoding, then refuse bitmaps over ~50 MP right after (a 24 MP photo is ~96 MB decoded, which many phones tolerate and 100 MP they don't). The file never leaves the browser, and the About section says so.
+- Large uploads are drawn straight to the target-size canvas, which downsamples; no separate resize step.
+
+### 4.7 Text
+
+- Fonts: the system UI font stack for the prototype, weight 600. A web font needs `document.fonts.load()` before measuring or the canvas silently falls back mid-render; defer that until it's wanted.
+- Layout is deterministic given a `measure(text, fontSizePx)` function, which makes `text-layout` testable with a fake. Blank lines are kept as vertical gaps; fully empty text skips the text/scrim step and exports the plain cropped background.
+- Alignment: left or center. Line height 1.25×. Text shadow/outline is left out; the scrim handles contrast.
+
+## 5. UI
+
+Mobile-first, since the audience is on a phone. Single page, single column on narrow screens; on wide screens the preview sits beside the controls.
+
+1. **Preview** at the top (sticky on desktop): the `<img>`, the guide overlay, and a caption telling phone users to hold the image to save it, a Share/Save button where `navigator.canShare` supports files, and a Download button on non-touch devices.
+2. **Screen size:** preset select grouped by device class, orientation toggle, custom W×H inputs, "use this device".
+3. **Background:** thumbnail grid plus "Upload your own". One focus slider, for the single axis the cover-crop discards (hidden when the aspect ratios match).
+4. **Text:** one textarea.
+5. **Style:** alignment, size, colour (auto/white/black), backdrop strength, vertical position, guide toggle.
+6. **About:** privacy statement, image credits.
+
+Accessibility basics: real labels on every input, visible focus, the preview `<img>` has alt text saying it is the generated lockscreen, colour is never the sole indicator, and controls are usable at 320 px width.
+
+## 6. Tooling and project setup
+
+- `npm create vite` React + TypeScript template, then: `strict: true`, `noUncheckedIndexedAccess`, Biome (line width 160), Vitest. Scripts: `dev`, `build`, `preview`, `test`, `lint`, `typecheck`.
+- Node 22 LTS (the installed version here is v22). Pin with `engines` and `.nvmrc`.
+- Output is `dist/`.
+- **Floating promises:** CLAUDE.md requires a lint error for them. Biome's `noFloatingPromises` is nursery-status with partial type awareness, so step 1 decides whether it is sufficient or whether to add `typescript-eslint`'s `no-floating-promises` for just this rule.
+- Errors: user-caused failures are typed `Error` subclasses shown inline; everything else goes through `log.ts` and a React error boundary.
+
+## 7. Deployment (Azure Static Web Apps, Free plan)
+
+- Pure static content, no API folder, no managed Functions.
+- Deploy via GitHub Actions using the SWA deploy action: `app_location: /`, `output_location: dist`, `skip_api_build`. We write the workflow file ourselves rather than letting the Azure portal commit one straight to `main`. The default workflow also creates public PR preview environments; decide whether to keep that. Creating the Azure resource and committing the workflow are outward-facing, so they get confirmed with you first. Keep `engines` in `package.json`, since Azure's builder reads the Node version from it.
+- `staticwebapp.config.json` in `public/`: security headers, including a CSP starting from `default-src 'self'; img-src 'self' blob: data:; script-src 'self'; style-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'` (Vite emits external CSS and React's `style` prop isn't blocked, so try without `'unsafe-inline'` and relax only if something breaks), and long cache lifetimes for hashed files under `/assets/`.
+- Free plan (per Microsoft's quotas page; re-check at creation time): 250 MB per app, 100 GB bandwidth per month per subscription with no overage, 2 custom domains. A ~10-15 MB site is far inside that.
+- Custom domain and TLS are included in the Free plan; not needed for the prototype.
+
+## 8. Testing
+
+Per CLAUDE.md: unit-test the seams, say plainly that the rest is manual.
+
+Unit tests (Vitest, Node environment, no DOM):
+
+- `size-validate`: boundaries (199/200, 8192/8193, the total-pixel cap via e.g. 8192×2049), non-integers, NaN. Assert on error *kind*, not message text.
+- `image-crop`: wider-than-target, taller-than-target, exact aspect match, focus at 0, 0.5, 1; rectangle always inside the source.
+- `text-layout` and `render-plan` with a fake monospace measure (in the shared test-support directory): wrapping at word boundaries, a single word wider than the block (breaks by character), short text stays at the base size, shrinks until it fits, overflow below the floor yields `TextOverflow`, `sizeScale` above 1 really enlarges (until overflow), the position slider has travel for short text, blank-line gaps, colour pick uses a fake luminance reader.
+- `render-latest`: stale results dropped, replaced URLs revoked, with fake timers.
+- `color-pick`: all-black, all-white, mid-grey threshold, a half-and-half buffer.
+- `safe-area`: rectangle stays inside the image for every class and for `position` 0, 0.5, 1; a portrait and a landscape size.
+- `device-presets`: ids unique, dimensions within the validator's limits, every device class has a safe area.
+- Spec reducer: pure state transitions.
+
+Not unit-testable, covered by a manual smoke checklist: canvas drawing, `toBlob`, image decoding, the long-press save on real devices, layout at 320/768/1280 px. A Playwright smoke test (load page, render, assert the `<img>` has the expected natural dimensions) is a good follow-up and is the one browser test worth adding early; it is not in the prototype's first cut.
+
+## 9. Privacy
+
+All processing is local. Nothing is sent, nothing is stored: no cookies, no `localStorage`, no analytics. Text typed into the lines may be a person's phone number and address, so persistence would be a deliberate feature later (opt-in, with a clear button), not a default. The cost is that a refresh loses the text; accepted for the prototype.
+
+## 10. Implementation order
+
+Each step builds and passes the suite on its own, and maps to a commit (or two):
+
+1. Scaffold: Vite, React, strict TS, Biome, Vitest, a passing placeholder test, `.nvmrc`.
+2. Pure logic with tests: `size-validate`, `image-crop`, `color-pick`, `safe-area`, `text-layout`.
+3. Data: device presets and bundled backgrounds (with the images, as its own commit).
+4. `render-plan`, `render-lockscreen`, and `image-decode`: one fixed spec rendered into the preview `<img>`, with Share/Download. **Test long-press and Share on a real iPhone and Android phone now**, and measure JPEG vs PNG.
+5. State and UI controls wired to the spec: device picker, text editor, background picker (bundled).
+6. Upload, focus control, style controls, guide overlay.
+7. About/credits, responsive polish, accessibility pass.
+8. Re-run device checks on the finished UI; fix what they find.
+9. Azure deployment (after confirmation).
+
+## 11. Alternatives considered
+
+- **Render text in HTML over an `<img>` and rasterise with `html-to-image`.** Extra dependency, and rasterising DOM is flaky across Safari versions. Canvas drawing is direct and testable.
+- **Show the `<canvas>` and rely on long-press.** Unreliable on iOS, which is the main target.
+- **Server-side rendering.** Breaks "static", adds cost, and sends personal text to a server.
+- **SVG composition.** Text wrapping is manual anyway, and getting an SVG to a PNG blob goes through a canvas regardless.
+- **Per-device safe areas.** More accurate and a maintenance burden; revisit if the class defaults prove wrong.
+
+## 12. Open questions and risks
+
+1. **Background set (Open):** reuse the 2023 images after a licence check, or choose a new set? Either way, someone has to verify licences image by image.
+2. **Preset list:** which devices to include at launch, and who curates it? Resolutions come from manufacturer specs.
+3. **Safe-area values:** the fractions in §4.5 are guesses. They need checking against real lock screenshots of an iPhone and a Pixel.
+4. **Long-press and Share behaviour** on current iOS and Android versions, including Samsung Internet, Firefox Android, and in-app browsers (§3). Tested on hardware at step 4.
+5. **Maximum canvas size** on older iOS devices; the 16.7 MP cap is conservative but unverified on hardware.
+6. **Lost-phone template (Open):** the original's use case (prefilled "if found" lines) could be the default text or a one-click preset. Cheap either way; it needs your call on the wording, since you may want to write that copy yourself.
+7. **Fonts:** system fonts look different per OS, so the same spec yields slightly different images on iOS and Windows. Acceptable for the prototype; a bundled font fixes it.
