@@ -1,5 +1,12 @@
 import { describe, expect, test } from 'vitest';
-import { backgroundName } from './background-name';
+import { backgroundFileName, backgroundName } from './background-name';
+
+describe('backgroundFileName', () => {
+  test('is the last path segment, extension included', () => {
+    expect(backgroundFileName('/src/assets/backgrounds/golden-hour.JPG')).toBe('golden-hour.JPG');
+    expect(backgroundFileName('plain.png')).toBe('plain.png');
+  });
+});
 
 describe('backgroundName', () => {
   test('drops the directory and extension', () => {

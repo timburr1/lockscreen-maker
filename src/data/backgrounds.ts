@@ -1,7 +1,9 @@
-import { backgroundName } from '../logic/background-name';
+import { backgroundFileName, backgroundName } from '../logic/background-name';
 
 export type BackgroundBundled = {
   readonly id: string;
+  /** Keys the image's entry in credits.json. */
+  readonly fileName: string;
   readonly name: string;
   readonly url: string;
 };
@@ -14,7 +16,7 @@ const modules = import.meta.glob<string>('/src/assets/backgrounds/*.{jpg,jpeg,pn
 });
 
 export const BACKGROUNDS_BUNDLED: readonly BackgroundBundled[] = Object.entries(modules)
-  .map(([path, value]) => ({ id: path, name: backgroundName(path), url: value }))
+  .map(([path, value]) => ({ id: path, fileName: backgroundFileName(path), name: backgroundName(path), url: value }))
   .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
 
 export function backgroundBundledFind(id: string): BackgroundBundled | undefined {
