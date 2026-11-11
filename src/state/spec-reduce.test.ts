@@ -59,6 +59,20 @@ describe('specReduce', () => {
     expect(specReduce(moved, { kind: 'background-set', background: { kind: 'bundled', id: 'a' } })).toBe(moved);
   });
 
+  test('selecting the already-selected upload changes nothing, including the focus', () => {
+    const background = { kind: 'upload', file: new File(['x'], 'a.png') } as const;
+    const moved = { ...spec, background, focus: { x: 0.1, y: 0.9 } };
+    expect(specReduce(moved, { kind: 'background-set', background: { kind: 'upload', file: background.file } })).toBe(moved);
+  });
+
+  test('a different upload file replaces the background and resets the focus', () => {
+    const moved = { ...spec, background: { kind: 'upload', file: new File(['x'], 'a.png') } as const, focus: { x: 0.1, y: 0.9 } };
+    const other = { kind: 'upload', file: new File(['y'], 'b.png') } as const;
+    const next = specReduce(moved, { kind: 'background-set', background: other });
+    expect(next.background).toBe(other);
+    expect(next.focus).toEqual({ x: 0.5, y: 0.5 });
+  });
+
   test('does not mutate the previous spec', () => {
     const before = structuredClone(spec);
     specReduce(spec, { kind: 'text-set', text: 'x' });

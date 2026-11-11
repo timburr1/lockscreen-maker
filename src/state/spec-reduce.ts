@@ -10,6 +10,10 @@ export type SpecAction =
   | { readonly kind: 'style-set'; readonly style: Partial<LockscreenStyle> }
   | { readonly kind: 'text-set'; readonly text: string };
 
+function backgroundSame(a: BackgroundRef, b: BackgroundRef): boolean {
+  return (a.kind === 'bundled' && b.kind === 'bundled' && a.id === b.id) || (a.kind === 'upload' && b.kind === 'upload' && a.file === b.file);
+}
+
 export function specReduce(spec: LockscreenSpec, action: SpecAction): LockscreenSpec {
   switch (action.kind) {
     case 'device-set':
@@ -17,7 +21,7 @@ export function specReduce(spec: LockscreenSpec, action: SpecAction): Lockscreen
     case 'orientation-swap':
       return { ...spec, size: { width: spec.size.height, height: spec.size.width } };
     case 'background-set':
-      if (action.background.kind === 'bundled' && spec.background.kind === 'bundled' && action.background.id === spec.background.id) {
+      if (backgroundSame(spec.background, action.background)) {
         return spec;
       }
       return { ...spec, background: action.background, focus: { x: 0.5, y: 0.5 } };
