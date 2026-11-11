@@ -2,7 +2,8 @@ import { ErrorRender } from '../errors';
 import { colorLuminanceMean } from '../logic/color-pick';
 import type { Rect } from '../logic/geometry';
 import { imageCropRect } from '../logic/image-crop';
-import { renderPlan } from '../logic/render-plan';
+import { type ImageRotation, imageRotationFocus, imageRotationSize } from '../logic/image-rotation';
+import { type RenderPlanBackground, renderPlan } from '../logic/render-plan';
 import type { TextMeasure } from '../logic/text-layout';
 import type { LockscreenSpecRender } from '../state/spec';
 
@@ -18,6 +19,19 @@ const OUTPUT_QUALITY = 0.92;
 const FONT_FAMILY = '-apple-system, system-ui, "Segoe UI", Roboto, sans-serif';
 const FONT_WEIGHT = 600;
 const LUMINANCE_SAMPLE_SIZE = 32;
+
+/** Draws `source` (a rectangle of the unrotated image) into `dest` on the canvas, turned clockwise by `rotation` about the centre of `dest`. */
+function imageDraw(ctx: CanvasRenderingContext2D, image: ImageBitmap, rotation: ImageRotation, source: Rect, dest: Rect): void {
+  // Before the turn the image's own axes are swapped relative to the destination for quarter turns.
+  const turned = rotation === 90 || rotation === 270;
+  const width = turned ? dest.height : dest.width;
+  const height = turned ? dest.width : dest.height;
+  ctx.save();
+  ctx.translate(dest.x + dest.width / 2, dest.y + dest.height / 2);
+  ctx.rotate((rotation * Math.PI) / 180);
+  ctx.drawImage(image, source.x, source.y, source.width, source.height, -width / 2, -height / 2, width, height);
+  ctx.restore();
+}
 
 /** Meant to be created once for the page's lifetime. Owns one reused canvas: iOS Safari frees canvas memory late, so a new full-size canvas per render eventually yields blank output. */
 export function lockscreenRendererCreate(doc: Document): LockscreenRenderer {
@@ -44,23 +58,32 @@ export function lockscreenRendererCreate(doc: Document): LockscreenRenderer {
 
   return {
     async render(spec, image) {
-      const { size } = spec;
+      const { size, backgroundRotation: rotation } = spec;
+      const imageSize = { width: image.width, height: image.height };
       canvas.width = size.width;
       canvas.height = size.height;
-      // Fill first so a transparent PNG does not encode to black, and downsample large photos with the best filter.
-      ctx.fillStyle = '#000';
+      // Fill first so a transparent PNG does not encode to black. The colour control only exists for contain, so cover stays black rather than show a colour the user cannot change.
+      const background: RenderPlanBackground =
+        spec.backgroundFit === 'contain' ? { kind: 'contain', size: imageRotationSize(imageSize, rotation), color: spec.backgroundColor } : { kind: 'cover' };
+      ctx.fillStyle = background.kind === 'contain' ? background.color : '#000';
       ctx.fillRect(0, 0, size.width, size.height);
       ctx.imageSmoothingQuality = 'high';
 
-      // Cover-crop the background over the whole canvas.
-      const crop = imageCropRect({ width: image.width, height: image.height }, size, spec.focus);
-      ctx.drawImage(image, crop.x, crop.y, crop.width, crop.height, 0, 0, size.width, size.height);
+      // A cover image goes down before planning because the plan may read its pixels; a contain image goes down after, in the rectangle the plan chooses.
+      if (background.kind === 'cover') {
+        const crop = imageCropRect(imageSize, imageRotationSize(size, rotation), imageRotationFocus(spec.focus, rotation));
+        imageDraw(ctx, image, rotation, crop, { x: 0, y: 0, width: size.width, height: size.height });
+      }
 
-      const result = renderPlan(spec, measure, luminanceMean);
+      const result = renderPlan(spec, background, measure, luminanceMean);
       if (result.kind === 'overflow') {
         return { kind: 'overflow' };
       }
       const { plan } = result;
+
+      if (plan.image.kind === 'contain') {
+        imageDraw(ctx, image, rotation, { x: 0, y: 0, width: image.width, height: image.height }, plan.image.rect);
+      }
 
       if (plan.scrim !== undefined) {
         const { rect, color, opacity } = plan.scrim;

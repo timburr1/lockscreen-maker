@@ -70,7 +70,10 @@ type LockscreenSpec = {
   readonly deviceClass: 'phone' | 'tablet' | 'desktop'              // selects the safe area; §4.4 says how custom sizes get one
   readonly deviceSelection: DeviceSelection                          // preset id | this device | custom: where the size came from, so the picker is derived from the spec
   readonly background: BackgroundRef
-  readonly focus: { readonly x: number; readonly y: number }          // 0..1, which part of the image survives the crop
+  readonly focus: { readonly x: number; readonly y: number }          // 0..1, which part of the image survives the crop (cover only)
+  readonly backgroundFit: 'cover' | 'contain'                         // cover crops to fill the screen; contain shows the whole image
+  readonly backgroundRotation: 0 | 90 | 180 | 270                     // clockwise degrees
+  readonly backgroundColor: ColorHex                                  // fills the screen around a contain image
   readonly text: string                                               // one textarea; split on newlines at layout time
   readonly style: {
     readonly align: 'left' | 'center'
@@ -85,6 +88,8 @@ type BackgroundRef =
   | { readonly kind: 'bundled'; readonly id: string }
   | { readonly kind: 'upload'; readonly file: File }   // added with uploads in step 6; only 'bundled' exists until then
 ```
+
+Choosing a different background resets `focus`, `backgroundRotation`, and `backgroundFit` (bundled images default to `cover`, uploads to `contain`, since an upload is often a photo of a card that should be seen whole) and keeps `backgroundColor`. Re-selecting the current background changes nothing.
 
 The decoded `ImageBitmap` is not in the spec. `browser/image-decode.ts` decodes once per background change, a small cache next to the spec holds the bitmap, and it is `close()`d when replaced. Re-decoding a 12-24 MP upload per edit would be unusable.
 
@@ -109,11 +114,13 @@ src/
     size-validate.ts           custom size → ok | specific error
     device-screen.ts           window.screen values, pixel ratio, touch → "this device" size and class (main.tsx does the window reads)
     image-crop.ts              cover-crop rectangle from source size, target size, focus
+    image-fit.ts               the largest centred rectangle of an image's aspect ratio inside a box (contain)
+    image-rotation.ts          quarter-turn cycle, rotated size, and the focus mapping from the rotated view back to the source
     text-layout.ts             wrap and shrink-to-fit given a measure function
-    render-plan.ts             spec + measure + luminance reader → text overlay plan (font, lines, placement, colour, backdrop)
+    render-plan.ts             spec + background (cover, or contain with image size and colour) + measure + luminance reader → overlay plan (font, lines, placement, colour, backdrop) and, for contain, the image rectangle
     latest.ts                  "latest wins": drops superseded async results, including failures
     preview-controller.ts      debounce, latest-wins, and object-URL lifetime; adapter hooks stay thin
-    color-pick.ts              average luminance of a pixel buffer → white | black
+    color-pick.ts              average luminance of a pixel buffer or a `#rrggbb` colour → white | black; the validated `ColorHex` type
     safe-area.ts               device class + position → text block rectangle
   browser/                     effects behind small functions
     image-decode.ts            File/URL → ImageBitmap (EXIF-aware), with specific errors
@@ -121,6 +128,8 @@ src/
   ui/
     device-picker.tsx          preset select, orientation swap, custom W×H, "this device"
     background-picker.tsx      thumbnail grid + upload button
+    image-controls.tsx         fill/fit, rotate, and the colour around a fitted image
+    slider-commit.tsx          range input that reports on release; color-commit.tsx is the colour equivalent, both over use-change-commit.ts
     text-editor.tsx            one textarea (newlines are lines, blank lines are gaps)
     error-boundary.tsx         generic "internal error" for bugs; typed user errors are shown inline instead
     style-controls.tsx         align, size, colour, scrim, position, focus
@@ -132,15 +141,16 @@ docs/
   design.md
 ```
 
-`lockscreen-renderer.ts` is deliberately the only canvas user and contains no decisions: it draws the cropped background, then executes the overlay plan that the pure `render-plan.ts` returns. Text block, layout, colour, and scrim decisions (where the bugs will be) are therefore unit-testable with a fake monospace `measure` and a fake luminance reader.
+`lockscreen-renderer.ts` is deliberately the only canvas user and contains no decisions: it fills the canvas, draws the image (before the plan for cover, in the plan's rectangle for contain), then executes the overlay plan that the pure `render-plan.ts` returns. The only choices it makes are mechanical: the fill colour and the draw order follow the background kind, and rotation is a canvas transform. Text block, layout, colour, scrim, and image-placement decisions (where the bugs will be) are therefore unit-testable with a fake monospace `measure` and a fake luminance reader.
 
 ### 4.3 Render pipeline
 
-The renderer draws the cropped background first, because the colour pick reads it back. `renderPlan(spec, measure, luminanceMean)` (pure) then returns the text overlay plan, and the renderer draws it and encodes the blob.
+The renderer fills the canvas, and in `cover` mode draws the cropped background next, because the colour pick reads it back. `renderPlan(spec, imageSize, measure, luminanceMean)` (pure) then returns the overlay plan (and, in `contain` mode, where the image goes), and the renderer draws it and encodes the blob.
 
-1. **Crop:** `image-crop` computes the source rectangle that covers the target aspect ratio, shifted toward `spec.focus`. If the source is smaller than the target it upscales; the UI warns when the factor exceeds ~1.5×.
+1. **Crop (`cover`):** `image-crop` computes the source rectangle that covers the target aspect ratio, shifted toward `spec.focus`. If the source is smaller than the target it upscales; the UI warns when the factor exceeds ~1.5×. Rotation is applied by turning the canvas, so the crop is taken on the unrotated source: the target size and focus are mapped into source orientation by `image-rotation`.
+   - **Fit (`contain`) instead:** the canvas is filled with `backgroundColor` and the whole image is placed below the text, never over it. The text and the image form one group, text on top, that `style.position` slides through the safe area. The text may use at most half the text area so the image keeps room (above that, the plan is `overflow`). The image gets the safe-area width, so it lines up with the backdrop and the on-screen guide, and the safe-area height the text leaves. Turning the image resets the crop focus, which is expressed in the on-screen frame. The image is drawn after the plan, so auto text colour is computed from `backgroundColor` instead of read back from pixels.
 2. **Font size:** base size = `output width × 0.06` (tunable constant) × `style.sizeScale`. Text wraps to the safe-area width at that size. If the wrapped height exceeds the safe-area height, shrink until it fits, down to a floor (~`output width × 0.025`). Below the floor the plan is a typed `TextOverflow` result and the UI says the text is too long; nothing is drawn at an unreadable size. Short text stays at the base size and does not grow to fill the area.
-3. **Placement:** the block height is the *laid-out* text height. Desktop gets only a small margin: lock-screen layouts differ too much between OSes to model, and the core use case is phones. `style.position` slides that block between the top and bottom of the safe area, so the slider has travel whenever the text is shorter than the area.
+3. **Placement:** the block height is the *laid-out* text height. Desktop gets only a small margin: lock-screen layouts differ too much between OSes to model, and the core use case is phones. `style.position` slides that block (in contain mode, the text and image together) between the top and bottom of the safe area, so the slider has travel whenever the content is shorter than the area.
 4. **Colour:** for `color: 'auto'`, the mean relative luminance of the safe area (via the `luminanceMean` reader, backed by `getImageData` on a 32×32 downsample on a context created with `willReadFrequently`) picks white or black through `color-pick`. Sampling the whole safe area rather than the moving block keeps the colour from flipping as the position slider moves. This generalises the 2023 tool's per-image override. `getImageData` is safe because bundled images are same-origin and uploads are blob-backed, so the canvas is never tainted.
 5. **Scrim (optional):** a translucent rectangle in the opposite colour at `style.scrim` opacity behind the block, for busy backgrounds. The text is laid out in the safe area inset by the backdrop padding, so the backdrop never leaves the safe area and the on-screen guide always contains it.
 6. **Text:** weight 600 on the system font stack (`-apple-system`/`system-ui` first; confirm Safari canvas resolves `system-ui`).
@@ -168,7 +178,7 @@ The OS draws a clock at the top and buttons (flashlight, camera) at the bottom, 
 | tablet | ~0.25 | ~0.10 | ~0.10 |
 | desktop | 0.05 | 0.05 | 0.05 |
 
-`style.position` slides the text block between the top and bottom of what remains. The guide overlay (a dashed box over the preview) shows the safe rectangle and a shaded clock zone, and a checkbox hides it. It is purely visual, in the DOM, and never in the file.
+`style.position` slides the text block (or, when the whole image is shown, the text and image together) between the top and bottom of what remains. The guide overlay (a dashed box over the preview) shows the safe rectangle and a shaded clock zone, and a checkbox hides it. It is purely visual, in the DOM, and never in the file.
 
 ### 4.6 Backgrounds
 
@@ -182,7 +192,7 @@ The OS draws a clock at the top and buttons (flashlight, camera) at the bottom, 
 ### 4.7 Text
 
 - Fonts: the system UI font stack for the prototype, weight 600. A web font needs `document.fonts.load()` before measuring or the canvas silently falls back mid-render; defer that until it's wanted.
-- Layout is deterministic given a `measure(text, fontSizePx)` function, which makes `text-layout` testable with a fake. Blank lines are kept as vertical gaps; fully empty text skips the text/scrim step and exports the plain cropped background.
+- Layout is deterministic given a `measure(text, fontSizePx)` function, which makes `text-layout` testable with a fake. Blank lines are kept as vertical gaps; fully empty text skips the text/scrim step and exports the plain background (cropped, or the fitted image alone on its colour).
 - Alignment: left or center. Line height 1.25×. Text shadow/outline is left out; the scrim handles contrast.
 
 ## 5. UI
@@ -191,7 +201,7 @@ Mobile-first, since the audience is on a phone. Single page, single column on na
 
 1. **Preview** at the top (sticky on desktop): the `<img>`, the guide overlay, and a caption telling phone users to hold the image to save it, a Share/Save button where `navigator.canShare` supports files, and a Download button on non-touch devices.
 2. **Screen size:** preset select grouped by device class, orientation toggle, custom W×H inputs, "use this device".
-3. **Background:** thumbnail grid plus "Upload your own". One focus slider, for the single axis the cover-crop discards (hidden when the aspect ratios match). Sliders commit on release, so the preview does not dim throughout a drag.
+3. **Background:** thumbnail grid plus "Upload your own". Image placement: fill or fit, a button that cycles the rotation through 0/90/180/270, and, when fitting, the colour around the image. One focus slider, for the single axis the cover-crop discards (hidden when fitting or when the aspect ratios match). Sliders and the colour input commit on release, so the preview does not dim throughout a drag.
 4. **Text:** one textarea.
 5. **Style:** alignment, size, colour (auto/white/black), backdrop strength, vertical position, guide toggle.
 6. **About:** privacy statement, image credits.
@@ -223,6 +233,10 @@ Unit tests (Vitest, Node environment, no DOM):
 - `size-validate`: boundaries (199/200, 8192/8193, the total-pixel cap via e.g. 8192×2049), non-integers, NaN. Assert on error *kind*, not message text.
 - `image-crop`: wider-than-target, taller-than-target, exact aspect match, focus at 0, 0.5, 1; rectangle always inside the source.
 - `text-layout` and `render-plan` with a fake monospace measure (in the shared test-support directory): wrapping at word boundaries, a single word wider than the block (breaks by character), short text stays at the base size, shrinks until it fits, overflow below the floor yields `TextOverflow`, `sizeScale` above 1 really enlarges (until overflow), the position slider has travel for short text, blank-line gaps, colour pick uses a fake luminance reader.
+- `image-rotation`: the cycle, the size swap, and the contract the renderer relies on: cropping the unrotated source with the mapped target and focus, then rotating, shows the same window as cropping the rotated image directly.
+- `image-fit`: the fitted rectangle keeps the aspect ratio, stays inside its box, and is centred.
+- `color-pick`: `#rrggbb` parsing accepts only that form, and the hex luminance agrees with the buffer version.
+- `render-plan` contain mode: image directly under the text, inside the safe area at every position, text capped so the image keeps room, auto colour from the background colour without reading pixels.
 - `latest` and `preview-controller`: stale results and stale failures dropped, replaced URLs revoked, dispose, with fake timers.
 - `color-pick`: all-black, all-white, mid-grey threshold, a half-and-half buffer.
 - `safe-area`: rectangle stays inside the image for every class and for `position` 0, 0.5, 1; a portrait and a landscape size.

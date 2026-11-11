@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { colorLuminanceMean, colorPick } from './color-pick';
+import { colorHexLuminance, colorHexParse, colorLuminanceMean, colorPick } from './color-pick';
 
 function solid(r: number, g: number, b: number, pixels = 16): Uint8ClampedArray {
   const data = new Uint8ClampedArray(pixels * 4);
@@ -27,6 +27,23 @@ describe('colorLuminanceMean', () => {
   test('an empty or misaligned buffer is a bug', () => {
     expect(() => colorLuminanceMean(new Uint8ClampedArray(0))).toThrow();
     expect(() => colorLuminanceMean(new Uint8ClampedArray(7))).toThrow();
+  });
+});
+
+describe('colorHexParse', () => {
+  test('accepts #rrggbb in either case and rejects everything else', () => {
+    expect(colorHexParse('#1a2B3c')).toBe('#1a2B3c');
+    for (const bad of ['', '#fff', '1a2b3c', '#1a2b3c0', '#gg0000', 'red']) {
+      expect(() => colorHexParse(bad)).toThrow();
+    }
+  });
+});
+
+describe('colorHexLuminance', () => {
+  test('agrees with the buffer version for the same colour', () => {
+    expect(colorHexLuminance(colorHexParse('#000000'))).toBe(0);
+    expect(colorHexLuminance(colorHexParse('#ffffff'))).toBeCloseTo(1, 10);
+    expect(colorHexLuminance(colorHexParse('#0a145a'))).toBeCloseTo(colorLuminanceMean(solid(10, 20, 90)), 10);
   });
 });
 

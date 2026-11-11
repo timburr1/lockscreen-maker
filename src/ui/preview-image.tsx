@@ -3,6 +3,7 @@ import { OUTPUT_MIME_TYPE } from '../browser/lockscreen-renderer';
 import { logError } from '../log';
 import type { PreviewReady, PreviewState } from '../logic/preview-controller';
 import { safeAreaGuide } from '../logic/safe-area';
+import type { BackgroundFit } from '../state/spec';
 
 const FILE_NAME = 'lockscreen.jpg';
 
@@ -10,16 +11,20 @@ type Props = {
   readonly state: PreviewState;
   readonly touch: boolean;
   readonly guideVisible: boolean;
+  readonly fit: BackgroundFit;
 };
 
 function canShareFile(file: File): boolean {
   return typeof navigator.canShare === 'function' && navigator.canShare({ files: [file] });
 }
 
-function problemMessage(state: PreviewState): string | undefined {
+function problemMessage(state: PreviewState, fit: BackgroundFit): string | undefined {
   switch (state.kind) {
     case 'overflow':
-      return 'There is too much text to fit on this screen. Remove some, or choose a larger screen.';
+      // Showing the whole image leaves the text only part of the safe area, so text that would fit with a filled background can overflow here.
+      return fit === 'contain'
+        ? 'There is too much text to fit above the image. Remove some, make the image fill the screen, or choose a larger screen.'
+        : 'There is too much text to fit on this screen. Remove some, or choose a larger screen.';
     case 'error':
       return state.reason === 'render' ? 'This browser could not create the image.' : 'Something went wrong while creating the image.';
     case 'pending':
@@ -48,13 +53,13 @@ function SafeAreaGuide({ size, deviceClass }: Pick<PreviewReady, 'size' | 'devic
 }
 
 /** Shows the current image with save actions; while a newer render is pending or has failed, the last good one stays visible but dimmed and cannot be saved. */
-export function PreviewImage({ state, touch, guideVisible }: Props) {
+export function PreviewImage({ state, touch, guideVisible, fit }: Props) {
   const [shareError, setShareError] = useState<string | undefined>(undefined);
   const shown = state.kind === 'ready' ? state : state.previous;
   const current = state.kind === 'ready';
   const blob = shown?.blob;
   const file = useMemo(() => (blob === undefined ? undefined : new File([blob], FILE_NAME, { type: OUTPUT_MIME_TYPE })), [blob]);
-  const problem = problemMessage(state);
+  const problem = problemMessage(state, fit);
 
   const share = async (shared: File) => {
     setShareError(undefined);

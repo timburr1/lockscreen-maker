@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest';
-import { type LockscreenSpec, SPEC_DEFAULT_STYLE } from './spec';
+import { colorHexParse } from '../logic/color-pick';
+import { type LockscreenSpec, SPEC_DEFAULT_BACKGROUND_COLOR, SPEC_DEFAULT_STYLE } from './spec';
 import { specReduce } from './spec-reduce';
 
 const spec: LockscreenSpec = {
@@ -8,9 +9,14 @@ const spec: LockscreenSpec = {
   deviceSelection: { kind: 'preset', id: 'iphone-15-16' },
   background: { kind: 'bundled', id: 'a' },
   focus: { x: 0.5, y: 0.5 },
+  backgroundFit: 'cover',
+  backgroundRotation: 0,
+  backgroundColor: SPEC_DEFAULT_BACKGROUND_COLOR,
   text: 'hello',
   style: SPEC_DEFAULT_STYLE,
 };
+
+const upload = { kind: 'upload', file: new File(['x'], 'license.jpg') } as const;
 
 describe('specReduce', () => {
   test('device-set replaces size, class, and selection and keeps everything else', () => {
@@ -59,18 +65,47 @@ describe('specReduce', () => {
     expect(specReduce(moved, { kind: 'background-set', background: { kind: 'bundled', id: 'a' } })).toBe(moved);
   });
 
-  test('selecting the already-selected upload changes nothing, including the focus', () => {
-    const background = { kind: 'upload', file: new File(['x'], 'a.png') } as const;
-    const moved = { ...spec, background, focus: { x: 0.1, y: 0.9 } };
-    expect(specReduce(moved, { kind: 'background-set', background: { kind: 'upload', file: background.file } })).toBe(moved);
+  test('background-rotation-next cycles through the four rotations', () => {
+    const rotations = [0, 90, 180, 270, 0];
+    let current = spec;
+    for (const expected of rotations.slice(1)) {
+      current = specReduce(current, { kind: 'background-rotation-next' });
+      expect(current.backgroundRotation).toBe(expected);
+    }
   });
 
-  test('a different upload file replaces the background and resets the focus', () => {
-    const moved = { ...spec, background: { kind: 'upload', file: new File(['x'], 'a.png') } as const, focus: { x: 0.1, y: 0.9 } };
-    const other = { kind: 'upload', file: new File(['y'], 'b.png') } as const;
-    const next = specReduce(moved, { kind: 'background-set', background: other });
-    expect(next.background).toBe(other);
+  test('background-fit-set and background-color-set replace one field each', () => {
+    expect(specReduce(spec, { kind: 'background-fit-set', fit: 'contain' })).toEqual({ ...spec, backgroundFit: 'contain' });
+    const color = colorHexParse('#102030');
+    expect(specReduce(spec, { kind: 'background-color-set', color })).toEqual({ ...spec, backgroundColor: color });
+  });
+
+  test('rotating resets the focus, since it is expressed in the on-screen frame', () => {
+    const next = specReduce({ ...spec, focus: { x: 0.1, y: 0.9 } }, { kind: 'background-rotation-next' });
     expect(next.focus).toEqual({ x: 0.5, y: 0.5 });
+  });
+
+  test('a new background resets rotation and picks the fit default for its kind, and keeps the colour', () => {
+    const color = colorHexParse('#102030');
+    const customised = { ...spec, backgroundRotation: 180, backgroundFit: 'contain', backgroundColor: color } as const;
+    const toUpload = specReduce(customised, { kind: 'background-set', background: upload });
+    expect(toUpload.backgroundRotation).toBe(0);
+    expect(toUpload.backgroundFit).toBe('contain');
+    expect(toUpload.backgroundColor).toBe(color);
+    const toBundled = specReduce({ ...toUpload, backgroundRotation: 90 }, { kind: 'background-set', background: { kind: 'bundled', id: 'b' } });
+    expect(toBundled.backgroundRotation).toBe(0);
+    expect(toBundled.backgroundFit).toBe('cover');
+  });
+
+  test('selecting the already-selected upload changes nothing, including rotation', () => {
+    const rotated = { ...spec, background: upload, backgroundRotation: 90 } as const;
+    expect(specReduce(rotated, { kind: 'background-set', background: { kind: 'upload', file: upload.file } })).toBe(rotated);
+  });
+
+  test('a different upload file replaces the background', () => {
+    const rotated = { ...spec, background: upload, backgroundRotation: 90 } as const;
+    const other = { kind: 'upload', file: new File(['y'], 'other.jpg') } as const;
+    expect(specReduce(rotated, { kind: 'background-set', background: other }).backgroundRotation).toBe(0);
   });
 
   test('does not mutate the previous spec', () => {

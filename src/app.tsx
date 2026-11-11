@@ -5,6 +5,9 @@ import { BACKGROUNDS_BUNDLED, backgroundBundledFind } from './data/backgrounds';
 import { logError } from './log';
 import type { DeviceScreen } from './logic/device-screen';
 import { IMAGE_UPSCALE_WARN, imageCropAxis, imageCropScale } from './logic/image-crop';
+import { imageFitScale } from './logic/image-fit';
+import { imageRotationSize } from './logic/image-rotation';
+import { safeAreaRect } from './logic/safe-area';
 import type { BackgroundRef } from './state/spec';
 import { specInitial } from './state/spec-initial';
 import { specReduce } from './state/spec-reduce';
@@ -12,6 +15,7 @@ import { About } from './ui/about';
 import { BackgroundPicker } from './ui/background-picker';
 import { DevicePicker } from './ui/device-picker';
 import { FocusControl } from './ui/focus-control';
+import { ImageControls } from './ui/image-controls';
 import { PreviewImage } from './ui/preview-image';
 import { StyleControls } from './ui/style-controls';
 import { TextEditor } from './ui/text-editor';
@@ -75,9 +79,13 @@ function Editor({ renderer, imageDecodeUrl: decodeUrl, imageDecodeFile: decodeFi
     }
   };
 
-  const imageSize = image === undefined ? undefined : { width: image.width, height: image.height };
-  const cropAxis = imageSize === undefined ? undefined : imageCropAxis(imageSize, spec.size);
-  const imageSoft = imageSize !== undefined && imageCropScale(imageSize, spec.size) > IMAGE_UPSCALE_WARN;
+  // The size the image has on screen, after rotation. Only a cover image is cropped, so only it has a crop axis; a contain image is judged against the safe area, which matches its width but under-warns when the text leaves it height-limited.
+  const imageSize = image === undefined ? undefined : imageRotationSize({ width: image.width, height: image.height }, spec.backgroundRotation);
+  const cover = spec.backgroundFit === 'cover';
+  const cropAxis = imageSize === undefined || !cover ? undefined : imageCropAxis(imageSize, spec.size);
+  const imageScale =
+    imageSize === undefined ? undefined : cover ? imageCropScale(imageSize, spec.size) : imageFitScale(imageSize, safeAreaRect(spec.size, spec.deviceClass));
+  const imageSoft = imageScale !== undefined && imageScale > IMAGE_UPSCALE_WARN;
 
   return (
     <main>
@@ -86,7 +94,7 @@ function Editor({ renderer, imageDecodeUrl: decodeUrl, imageDecodeFile: decodeFi
         <div className="editor-preview">
           {bitmap.failed && <p role="alert">The background image could not be loaded.</p>}
           {imageSoft && <p role="status">This image is small for this screen size, so it may look soft.</p>}
-          <PreviewImage state={state} touch={touch} guideVisible={guideVisible} />
+          <PreviewImage state={state} touch={touch} guideVisible={guideVisible} fit={spec.backgroundFit} />
         </div>
         <div className="editor-controls">
           <DevicePicker size={spec.size} deviceClass={spec.deviceClass} selection={spec.deviceSelection} screen={screen} dispatch={dispatch} />
@@ -104,6 +112,7 @@ function Editor({ renderer, imageDecodeUrl: decodeUrl, imageDecodeFile: decodeFi
             }}
             onUpload={(file) => void uploadAccept(file)}
           />
+          <ImageControls fit={spec.backgroundFit} rotation={spec.backgroundRotation} color={spec.backgroundColor} dispatch={dispatch} />
           {cropAxis !== undefined && <FocusControl axis={cropAxis} focus={spec.focus} dispatch={dispatch} />}
           <TextEditor text={spec.text} onChange={(text) => dispatch({ kind: 'text-set', text })} />
           <StyleControls style={spec.style} dispatch={dispatch} />

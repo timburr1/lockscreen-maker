@@ -25,6 +25,13 @@ describe('specInitial', () => {
     }
   });
 
+  test('starts filling the screen, unrotated, on a white background colour', () => {
+    const spec = specInitial({ screen: undefined, screenPreferred: false, backgroundId: 'a' });
+    expect(spec.backgroundFit).toBe('cover');
+    expect(spec.backgroundRotation).toBe(0);
+    expect(spec.backgroundColor).toBe('#ffffff');
+  });
+
   test('starts with the placeholder text and a centred focus', () => {
     const spec = specInitial({ screen: undefined, screenPreferred: false, backgroundId: 'a' });
     expect(spec.text).not.toBe('');

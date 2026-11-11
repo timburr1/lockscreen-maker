@@ -22,6 +22,25 @@ export function colorLuminanceMean(rgba: Uint8ClampedArray): number {
   return total / (rgba.length / 4);
 }
 
+/** A `#rrggbb` colour. Branded so that only `colorHexParse` can make one, and downstream code can trust it. */
+export type ColorHex = string & { readonly colorHexBrand: true };
+
+const COLOR_HEX_PATTERN = /^#[0-9a-f]{6}$/i;
+
+/** Validates a string from outside the program (a color input, or a literal) as a `#rrggbb` colour. */
+export function colorHexParse(value: string): ColorHex {
+  if (!COLOR_HEX_PATTERN.test(value)) {
+    throw new Error(`Expected a #rrggbb colour, got ${value}`);
+  }
+  return value as ColorHex; // validated just above
+}
+
+/** Relative luminance (0..1) of a colour. */
+export function colorHexLuminance(color: ColorHex): number {
+  const channel = (start: number) => Number.parseInt(color.slice(start, start + 2), 16);
+  return colorLuminanceMean(Uint8ClampedArray.of(channel(1), channel(3), channel(5), 255));
+}
+
 /** The text colour that reads best over a background of the given mean luminance. */
 export function colorPick(luminance: number): 'white' | 'black' {
   return luminance > LUMINANCE_CROSSOVER ? 'black' : 'white';
