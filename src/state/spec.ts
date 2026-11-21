@@ -44,7 +44,7 @@ export const SPEC_DEFAULT_TEXT = 'If found, please contact:\n[Name]\n[Phone]\n[E
 
 export const SPEC_DEFAULT_STYLE: LockscreenStyle = { align: 'center', sizeScale: 1, color: 'auto', scrim: 0.35, position: 0.5 };
 
-export const SPEC_DEFAULT_BACKGROUND_COLOR: ColorHex = colorHexParse('#ffffff');
+export const SPEC_DEFAULT_BACKGROUND_COLOR: ColorHex = colorHexParse('#000000');
 
 /** A photo of a card should be seen whole; a scenic background should fill the screen. */
 export function specBackgroundFitDefault(background: BackgroundRef): BackgroundFit {
